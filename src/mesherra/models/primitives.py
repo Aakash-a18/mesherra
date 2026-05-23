@@ -141,6 +141,9 @@ class Residue(BaseModel):
     previous_hash: str
 
     # ISO 8601 UTC timestamp of when this entry was recorded.
+    # NOTE: Phase 1 enforces non-emptiness only. Strict ISO-8601 parsing and
+    # clock-skew tolerance land with Phase 1 step 2 (Crypto), where the
+    # timestamp is produced at signing time by the Signer.
     timestamp: str = Field(min_length=1)
 
     # Principal that performed the action. For emit entries this equals
@@ -168,6 +171,9 @@ class Residue(BaseModel):
     # Ed25519 signature (base64) over the canonical JSON of this entry with
     # the signature field omitted. Verified against the actor's public key
     # resolved through the Identity Directory.
+    # NOTE: Phase 1 enforces non-emptiness only. Strict base64 + Ed25519
+    # signature-length validation lands with Phase 1 step 2 (Crypto), where
+    # the Signer/Verifier round-trip is the load-bearing test.
     signature: str = Field(min_length=1)
 
     @field_validator("payload_hash")
@@ -193,10 +199,25 @@ class Residue(BaseModel):
     def to_signing_payload(self) -> dict[str, Any]:
         """Return the dict form of this entry with the signature field omitted.
 
-        The signature is computed over the canonical JSON encoding of THIS
-        return value, not over the full entry. Omitting (not blanking) the
-        signature is the convention required by demos/phase_1/SPEC.md
-        section 4.
+        IMPORTANT — caller responsibility: this method returns a Python dict.
+        The signature is computed over the **canonical JSON encoding** (JCS,
+        RFC 8785) of this dict, NOT over the dict itself and NOT over
+        ``json.dumps(...)`` output (Python's default JSON serializer is not
+        canonical and will produce different bytes across processes).
+
+        The caller (Phase 1 step 2's Signer.sign) must do::
+
+            from jcs import canonicalize
+            from hashlib import sha256
+
+            canonical_bytes = canonicalize(residue.to_signing_payload())
+            signature = signer.sign(canonical_bytes)
+            # ... then construct a new Residue with this signature
+
+        Omitting (not blanking) the signature key is the convention required
+        by demos/phase_1/SPEC.md section 4: hashing must be over the
+        *signature-less* canonical encoding, otherwise the signed bytes would
+        contain the signature being computed (a chicken-and-egg).
         """
         data = self.model_dump(mode="json")
         data.pop("signature", None)

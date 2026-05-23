@@ -103,7 +103,7 @@ Cryptographically signed, append-only trace. Each agent that acts on an Object a
 
 - Acting agent's verified identity
 - Action taken (created, promoted, modified, attested, revoked)
-- Authorization chain — which policy clause permitted this
+- Authorization chain — which policy clause permitted this *(Phase 3+; not present in `entry-v1` since Phase 1 has no Policy Engine to reference)*
 - Timestamp
 - Reference to A2A `task.id` and `context_id`
 
