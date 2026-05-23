@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tesherra"
+version = "0.0.1"
+description = "Trust layer for agent-to-agent (A2A) interaction"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "TBD" }
+authors = [{ name = "Tesherra contributors" }]
+keywords = ["a2a", "agents", "trust", "provenance", "identity"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Developers",
+]
+
+dependencies = [
+    "a2a-sdk",                  # Google's Agent2Agent SDK; the substrate we build on
+    "cryptography>=42.0",       # Signing, hashing, key management (Ed25519)
+    "pydantic>=2.0",            # Structured models for primitives and payloads
+    "pydantic-settings>=2.0",   # Env-var configuration (fail-fast on missing values)
+    "fastapi>=0.100",           # HTTP serving for directory, registry, ledger APIs
+    "uvicorn>=0.23",            # ASGI server
+    "httpx>=0.25",              # Outbound HTTP for directory/registry lookups
+    "sqlalchemy>=2.0",          # Storage abstraction (SQLite v0, Postgres later)
+    "jcs>=0.2",                 # JSON Canonicalization Scheme (RFC 8785)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.7",
+    "types-cryptography",
+]
+
+[project.urls]
+Architecture = "https://github.com/REPLACE/tesherra/blob/main/docs/ARCHITECTURE.md"
+Strategy = "https://github.com/REPLACE/tesherra/blob/main/docs/STRATEGY.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tesherra"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "RUF"]
+ignore = []
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
