@@ -1,4 +1,4 @@
-"""Tesherra primitive models.
+"""Mesherra primitive models.
 
 Per ARCHITECTURE.md section 3 (Core concepts).
 
@@ -9,7 +9,7 @@ provenance vertical slice) and the supporting ActionType / Operation enums.
 The other primitives remain stubs until Phase 2/3 needs them.
 
 Schema authority: this module is the source of truth for the residue shape.
-The JSON Schema mirror at ``tesherra/src/tesherra/provenance/entry_v1.json`` is
+The JSON Schema mirror at ``mesherra/src/mesherra/provenance/entry_v1.json`` is
 generated against this model and exists for runtime validation and cross-
 language consumers; it must stay byte-equivalent on the field-set level.
 """
@@ -96,7 +96,7 @@ _HEX64_OR_EMPTY_PATTERN = re.compile(r"^([0-9a-f]{64}|)$")
 class Residue(BaseModel):
     """A single append-only signed entry in a principal's provenance ledger.
 
-    Schema ID: ``tesherra.provenance/entry-v1``
+    Schema ID: ``mesherra.provenance/entry-v1``
     Spec: ARCHITECTURE.md section 3.6 and demos/phase_1/SPEC.md section 3.
 
     Each entry records one action that this ledger's owner took or observed.
@@ -116,8 +116,8 @@ class Residue(BaseModel):
         extra="forbid",
         frozen=True,
         json_schema_extra={
-            "$id": "tesherra.provenance/entry-v1",
-            "title": "Tesherra Provenance Ledger Entry v1",
+            "$id": "mesherra.provenance/entry-v1",
+            "title": "Mesherra Provenance Ledger Entry v1",
         },
     )
 

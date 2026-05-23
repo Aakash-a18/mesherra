@@ -1,11 +1,11 @@
-# Tesherra Visual Reference
+# Mesherra Visual Reference
 
 Six diagrams covering the architecture from outside-in:
 
-1. **The Layer Stack** — where Tesherra sits in the larger system
+1. **The Layer Stack** — where Mesherra sits in the larger system
 2. **Two Users, Mirrored Stacks** — A2A in the middle, internal zones on each side
 3. **One Full Meeting Negotiation, Step by Step** — end-to-end flow between two users
-4. **Tesherra Internal Architecture** — what's inside the trust layer
+4. **Mesherra Internal Architecture** — what's inside the trust layer
 5. **Outbound Message Flow** — what happens when a consumer sends
 6. **Inbound Message Flow** — what happens when a message arrives
 
@@ -57,9 +57,9 @@ What sits on what.
 └────────────────────────────────────────────────────────────┘
 ```
 
-**Read top to bottom.** The consumer app is what the user sees. Under it sits the consumer's domain logic. Under that, Tesherra. Under us, Google's A2A protocol. Under that, the regular internet.
+**Read top to bottom.** The consumer app is what the user sees. Under it sits the consumer's domain logic. Under that, Mesherra. Under us, Google's A2A protocol. Under that, the regular internet.
 
-Tesherra is the layer between any consumer app and the wire. The app calls into us. We call into A2A.
+Mesherra is the layer between any consumer app and the wire. The app calls into us. We call into A2A.
 
 ---
 
@@ -123,7 +123,7 @@ The A2A wire in the middle, internal trust zones on each side.
             └───────────────────────────────────────────┘
 ```
 
-**Read left to right.** Each user has the same five-layer stack. The only thing that crosses between them is messages through the Tesherra airlock onto the A2A wire. Nothing inside one user's internal zone is ever directly reachable from the other side.
+**Read left to right.** Each user has the same five-layer stack. The only thing that crosses between them is messages through the Mesherra airlock onto the A2A wire. Nothing inside one user's internal zone is ever directly reachable from the other side.
 
 The diagram shows the request direction (User 1 → User 2). The response flows the same way in reverse.
 
@@ -192,13 +192,13 @@ The diagram shows the request direction (User 1 → User 2). The response flows 
 
 ---
 
-## Diagram 4: Tesherra Internal Architecture
+## Diagram 4: Mesherra Internal Architecture
 
 What's actually inside the trust layer.
 
 ```
                     CONSUMER (e.g., MeshyCal scheduling agent)
-                    Calls into Tesherra through the SDK
+                    Calls into Mesherra through the SDK
                                   │
                                   ▼
 ╔═══════════════════════════════════════════════════════════════════╗
@@ -253,7 +253,7 @@ What's actually inside the trust layer.
 ║  │   │ signed      │  │ registry of │  │ signed log  │      │     ║
 ║  │   │ constitution│  │ verified    │  │ of every    │      │     ║
 ║  │   │             │  │ principals  │  │ interaction │      │     ║
-║  │   │ (user-      │  │ (Tesherra-   │  │ (per task)  │      │     ║
+║  │   │ (user-      │  │ (Mesherra-   │  │ (per task)  │      │     ║
 ║  │   │  owned)     │  │  hosted v0) │  │             │      │     ║
 ║  │   └─────────────┘  └─────────────┘  └─────────────┘      │     ║
 ║  └──────────────────────────────────────────────────────────┘     ║
@@ -271,7 +271,7 @@ What's actually inside the trust layer.
 ║  │              A2A SDK ADAPTER                             │     ║
 ║  │                                                          │     ║
 ║  │   Thin wrapper over Google's a2a-sdk / @a2a-js/sdk       │     ║
-║  │   Translates Tesherra messages ↔ A2A SendMessage,         │     ║
+║  │   Translates Mesherra messages ↔ A2A SendMessage,         │     ║
 ║  │   GetTask, SubscribeToTask, etc.                         │     ║
 ║  └──────────────────────────────────────────────────────────┘     ║
 ║                                                                   ║
@@ -293,10 +293,10 @@ What's actually inside the trust layer.
 | **Policy Engine** | The decision-maker. Given a request, reads the user's policy and decides allow / scope / block / escalate. |
 | **Identity Directory** | The "is this really who they claim to be" service. Resolves agent names to verified cryptographic identities. |
 | **Policy Store** | Where the user's constitution lives. Signed by the user. Cannot be written by the platform. |
-| **Directory Store** | The verified registry of principals. Initially Tesherra-hosted; designed for later decentralization. |
+| **Directory Store** | The verified registry of principals. Initially Mesherra-hosted; designed for later decentralization. |
 | **Provenance Ledger** | The permanent, append-only, signed log of every interaction. Foundation for any liability claim. |
 | **Crypto Primitives** | Shared utility: signing, verification, keys, hashing. Off-the-shelf libraries, no inventing. |
-| **A2A SDK Adapter** | The translator between Tesherra's world and Google's a2a-sdk. The only place that touches A2A. |
+| **A2A SDK Adapter** | The translator between Mesherra's world and Google's a2a-sdk. The only place that touches A2A. |
 
 See `docs/ARCHITECTURE.md` section 11 for the full component inventory with operations and v0 implementation notes.
 
@@ -308,7 +308,7 @@ What happens when a consumer's agent says "send this to that other agent."
 
 ```
 CONSUMER calls:
-  tesherra.send_to(
+  mesherra.send_to(
     peer = User2's agent,
     parts = ["proposal: Tuesday 2pm"]
   )
@@ -430,11 +430,11 @@ What happens when an A2A message arrives from somewhere.
 
 ## The Big Picture
 
-**Tesherra is, mechanically, two gateways with a shared brain.**
+**Mesherra is, mechanically, two gateways with a shared brain.**
 
 - The Outbound Gateway is the airlock for things leaving the user's trust zone. Nothing exits without being scoped, signed, and recorded.
 - The Inbound Gateway is the airlock for things entering. Nothing reaches the user's agents without being verified, policy-checked, and logged.
 - Both gateways consult the same Decision Services (Policy Engine, Identity Directory), which in turn read the same Persistent Stores (Policy, Directory, Provenance) and use the same Crypto Primitives.
-- The A2A SDK Adapter is the only place in the whole system that knows about A2A. Everything above it is in Tesherra's own model. Everything below it is Google's protocol.
+- The A2A SDK Adapter is the only place in the whole system that knows about A2A. Everything above it is in Mesherra's own model. Everything below it is Google's protocol.
 
-That last property is what makes Tesherra durable: if A2A changes, only the adapter changes. If a new protocol emerges later, we add another adapter without touching the Decision Services, Stores, or Gateways. The trust model is independent of the wire format.
+That last property is what makes Mesherra durable: if A2A changes, only the adapter changes. If a new protocol emerges later, we add another adapter without touching the Decision Services, Stores, or Gateways. The trust model is independent of the wire format.

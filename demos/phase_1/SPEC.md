@@ -1,9 +1,9 @@
 # Phase 1 Demo Spec
 
-This document is the bridge between Tesherra's architecture (the *what* and *why*) and Phase 1 code (the *how*). It pins down four artifacts the reviewer flagged as hand-waved in the architecture:
+This document is the bridge between Mesherra's architecture (the *what* and *why*) and Phase 1 code (the *how*). It pins down four artifacts the reviewer flagged as hand-waved in the architecture:
 
 1. The exact JSON for `meshycal.scheduling/proposal-v1`
-2. The exact JSON for the residue entry (`tesherra.provenance/entry-v1`)
+2. The exact JSON for the residue entry (`mesherra.provenance/entry-v1`)
 3. The canonicalization commitment (JCS, the `jcs` Python library, SHA-256)
 4. The end-state assertion (both sides hold byte-equal, signature-verifying entries)
 
@@ -11,7 +11,7 @@ Phase 1 code is written *against* this spec. If the spec is wrong, the code is w
 
 ## 0. Goal
 
-Prove that Tesherra's provenance layer works mechanically: two principals on the same host can exchange a structured payload, sign it independently, write matching entries into their own append-only ledgers, and verify after the fact that both ledgers agree on what happened — without trusting each other's claims.
+Prove that Mesherra's provenance layer works mechanically: two principals on the same host can exchange a structured payload, sign it independently, write matching entries into their own append-only ledgers, and verify after the fact that both ledgers agree on what happened — without trusting each other's claims.
 
 This is the smallest possible end-to-end demonstration of the trust layer. Nothing else from the architecture is exercised. No identity verification, no scoped disclosure, no policy engine, no schema registry, no guest principals, no UI, no LLM.
 
@@ -20,12 +20,12 @@ This is the smallest possible end-to-end demonstration of the trust layer. Nothi
 ### In scope (Phase 1 must do these)
 
 - Define and use the `meshycal.scheduling/proposal-v1` schema (locally; no Schema Registry lookup)
-- Define and use the `tesherra.provenance/entry-v1` schema (the residue entry format)
+- Define and use the `mesherra.provenance/entry-v1` schema (the residue entry format)
 - Canonical JSON encoding per RFC 8785 (JCS)
 - SHA-256 content hashing of canonical bytes
 - Ed25519 signing and verification of residue entries
 - Append-only SQLite-backed Provenance Ledger with hash-chain integrity
-- Minimal Tesherra SDK surface: `attest()`, `get_residue_chain()`, message send/receive plumbing
+- Minimal Mesherra SDK surface: `attest()`, `get_residue_chain()`, message send/receive plumbing
 - Minimal A2A SDK Adapter wired to send/receive Messages over localhost
 - Two deterministic Python scheduling agents (Agent A and Agent B) exercising the round-trip
 - An end-state assertion script that verifies the demo succeeded
@@ -97,15 +97,15 @@ A counter-proposal uses the same schema. An acceptance is a proposal with `candi
 
 ## 3. The Residue Entry Schema
 
-**Schema ID:** `tesherra.provenance/entry-v1`
-**Owner:** Tesherra (the trust layer)
-**Phase 1 location:** authoritative Python type in `tesherra/src/tesherra/models/primitives.py` (the Residue model gets a real body in Phase 1). JSON Schema mirror in `tesherra/src/tesherra/provenance/entry_v1.json` for runtime validation.
+**Schema ID:** `mesherra.provenance/entry-v1`
+**Owner:** Mesherra (the trust layer)
+**Phase 1 location:** authoritative Python type in `mesherra/src/mesherra/models/primitives.py` (the Residue model gets a real body in Phase 1). JSON Schema mirror in `mesherra/src/mesherra/provenance/entry_v1.json` for runtime validation.
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tesherra.provenance/entry-v1",
-  "title": "Tesherra Provenance Ledger Entry v1",
+  "$id": "mesherra.provenance/entry-v1",
+  "title": "Mesherra Provenance Ledger Entry v1",
   "description": "An append-only, signed entry in a single principal's residue ledger. Each entry records one action this principal took or observed.",
   "type": "object",
   "additionalProperties": false,
@@ -315,7 +315,7 @@ A third process (`run_demo.py`) orchestrates: starts A and B, triggers A to init
   8. Open A2A Task targeting Agent B:
      - context_id: new UUID
      - Message Parts: [Part.data containing the proposal payload]
-     - Artifact.metadata: { "tesherra.provenance.entry_hash": SHA-256(JCS(entry)) }
+     - Artifact.metadata: { "mesherra.provenance.entry_hash": SHA-256(JCS(entry)) }
   9. Wait for response.
 
 [Agent B] (via A2A SDK Adapter receiving the Task message)
@@ -355,21 +355,21 @@ A third process (`run_demo.py`) orchestrates: starts A and B, triggers A to init
 
 What gets coded first, second, etc. (matches `ARCHITECTURE.md` section 12 build-order rule):
 
-1. **Models** (`tesherra/src/tesherra/models/primitives.py`)
+1. **Models** (`mesherra/src/mesherra/models/primitives.py`)
    - Flesh out `Residue` as a real Pydantic model matching the entry schema.
-   - JSON Schema mirror in `tesherra/src/tesherra/provenance/entry_v1.json`.
-2. **Crypto** (`tesherra/src/tesherra/crypto/primitives.py`)
+   - JSON Schema mirror in `mesherra/src/mesherra/provenance/entry_v1.json`.
+2. **Crypto** (`mesherra/src/mesherra/crypto/primitives.py`)
    - Implement `Signer.sign()`, `Verifier.verify()`, `content_hash()`.
    - Add `canonical_json()` wrapper around the `jcs` library.
    - Skip `mint_guest_credential` (Phase 1.5).
-3. **Provenance Ledger** (`tesherra/src/tesherra/provenance/ledger.py`)
+3. **Provenance Ledger** (`mesherra/src/mesherra/provenance/ledger.py`)
    - SQLite-backed append-only table with hash-chain integrity.
    - Implement `append()`, `get_by_task()`, `get_by_context()`, `verify_chain()`.
-4. **A2A SDK Adapter** (`tesherra/src/tesherra/a2a_adapter/adapter.py`)
+4. **A2A SDK Adapter** (`mesherra/src/mesherra/a2a_adapter/adapter.py`)
    - Wire `SendMessage` and a receive callback against `a2a-sdk`.
    - Implement `envelope_to_a2a()` and `a2a_to_envelope()` for the minimal shapes.
    - Skip `SubscribeToTask` (Phase 2/3).
-5. **SDK** (`tesherra/src/tesherra/sdk.py`)
+5. **SDK** (`mesherra/src/mesherra/sdk.py`)
    - Implement `attest(task_id)`, `get_residue(task_id)`, `get_residue_chain(context_id)`, and the send/receive plumbing that calls into the adapter and ledger.
    - Leave `verify`, `update_policy`, `register_principal` as `NotImplementedError` (Phase 2/3).
 6. **MeshyCal scheduling agents** (`MeshyCal/demos/phase_1/`)
@@ -379,13 +379,13 @@ What gets coded first, second, etc. (matches `ARCHITECTURE.md` section 12 build-
 7. **Orchestrator + assertions** (`MeshyCal/demos/phase_1/run_demo.py`)
    - Starts both agents, triggers the negotiation, runs the 14 assertions.
 
-Steps 1–3 are pure-Tesherra and can run as unit tests before any A2A wire exists. Step 4 introduces the wire. Steps 5–7 are integration. The pre-flight check (section 9) gates everything: if JCS round-tripping isn't byte-equal, fix that before writing any of the above.
+Steps 1–3 are pure-Mesherra and can run as unit tests before any A2A wire exists. Step 4 introduces the wire. Steps 5–7 are integration. The pre-flight check (section 9) gates everything: if JCS round-tripping isn't byte-equal, fix that before writing any of the above.
 
 ## 8. File Layout
 
 ```
-tesherra/
-├── src/tesherra/
+mesherra/
+├── src/mesherra/
 │   ├── models/primitives.py            # Residue model gets a body
 │   ├── crypto/primitives.py            # Signer/Verifier/content_hash/canonical_json
 │   ├── provenance/

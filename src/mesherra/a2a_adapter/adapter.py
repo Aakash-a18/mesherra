@@ -2,19 +2,19 @@
 
 Implements ARCHITECTURE.md section 13.10.
 
-The only module in Tesherra that imports `a2a-sdk`.
+The only module in Mesherra that imports `a2a-sdk`.
 
 Responsibilities:
 - Wrap A2A's SendMessage, GetTask, SubscribeToTask, push notifications
-- Translate Tesherra's envelope format <-> A2A's Message, Part, Artifact
-- Map A2A TaskState transitions onto Tesherra events:
+- Translate Mesherra's envelope format <-> A2A's Message, Part, Artifact
+- Map A2A TaskState transitions onto Mesherra events:
     INPUT_REQUIRED -> butler escalation
     AUTH_REQUIRED  -> identity re-verification
     COMPLETED      -> trigger attestation
 - Embed signed provenance metadata into A2A Artifact.metadata on completion
 
 Strict isolation: if A2A changes, only this module changes. No other module
-in Tesherra imports `a2a-sdk` or references A2A types directly.
+in Mesherra imports `a2a-sdk` or references A2A types directly.
 
 Status: scaffolding only.
 """
@@ -40,9 +40,9 @@ class A2AAdapter:
         raise NotImplementedError
 
     def envelope_to_a2a(self, envelope: Any) -> Any:
-        """Translate Tesherra envelope -> A2A Message/Parts."""
+        """Translate Mesherra envelope -> A2A Message/Parts."""
         raise NotImplementedError
 
     def a2a_to_envelope(self, message: Any) -> Any:
-        """Translate A2A Message/Parts -> Tesherra envelope."""
+        """Translate A2A Message/Parts -> Mesherra envelope."""
         raise NotImplementedError

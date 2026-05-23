@@ -4,9 +4,9 @@ Implements ARCHITECTURE.md section 13.7.
 
 Backing storage for the Identity Directory.
 
-v0: relational database (Postgres or equivalent), Tesherra-hosted. Each row is
+v0: relational database (Postgres or equivalent), Mesherra-hosted. Each row is
 a principal record with signed AgentCard hash, public key, and claim metadata.
-Local development uses SQLite via the URL in TESHERRA_DIRECTORY_STORE_URL.
+Local development uses SQLite via the URL in MESHERRA_DIRECTORY_STORE_URL.
 
 Future: pluggable backend for decentralized models.
 

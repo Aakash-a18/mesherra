@@ -1,4 +1,4 @@
-# Tesherra Architecture
+# Mesherra Architecture
 
 ## 1. Problem
 
@@ -10,7 +10,7 @@ Documented gaps in the A2A specification:
 - **The wire format carries whatever `Part`s the sender includes.** A2A has no concept of "minimum disclosure" or scoped sharing.
 - **Task completion produces an `Artifact` with optional `metadata`.** A2A provides no provenance schema, signature mechanism, or liability-grade record beyond basic logs.
 
-Without these, autonomous agents cannot transact safely, coordinate across organizations, or operate in regulated contexts. Tesherra is the layer that fills the gap.
+Without these, autonomous agents cannot transact safely, coordinate across organizations, or operate in regulated contexts. Mesherra is the layer that fills the gap.
 
 ## 2. Relationship to A2A
 
@@ -28,7 +28,7 @@ Without these, autonomous agents cannot transact safely, coordinate across organ
 | Task output | `Artifact` with `parts` and `metadata` |
 | Transport security | mTLS, OAuth2, OIDC, API key (declared in AgentCard) |
 
-### What Tesherra adds
+### What Mesherra adds
 
 | Piece | Description |
 |---|---|
@@ -45,7 +45,7 @@ Layers 1–3 are the product surface. Layer 0 develops alongside the others.
 
 A principal. Has:
 
-- **Identity** — cryptographically verifiable through the Tesherra directory.
+- **Identity** — cryptographically verifiable through the Mesherra directory.
 - **Intent** — delegated from the user via Policy.
 - **Authority scope** — the set of actions the principal may take, the boundaries it may cross, the Objects it may promote.
 - **Zone standing** — which trust zones the agent has been granted to operate in.
@@ -65,7 +65,7 @@ A passive resource: a calendar, a document, a 3D model, a meeting agreement, a c
 - **Per-viewer layer-membership** — the live, contextual answer to "who can presently perceive this." A *relation* between Object and viewer, not a property of the Object.
 - **Residue** — append-only cryptographic trace of every agent that has touched the Object.
 
-> **Important:** Objects are *not* A2A `Artifact`s. An A2A Artifact is the output of a Task. An Object is any shareable resource that may flow through or be referenced by a Task. When an Object is delivered as the result of a Task, it may be wrapped in an A2A Artifact (as Parts plus signed Tesherra metadata), but the Object's identity, lifecycle, and residue are independent of any single Task.
+> **Important:** Objects are *not* A2A `Artifact`s. An A2A Artifact is the output of a Task. An Object is any shareable resource that may flow through or be referenced by a Task. When an Object is delivered as the result of a Task, it may be wrapped in an A2A Artifact (as Parts plus signed Mesherra metadata), but the Object's identity, lifecycle, and residue are independent of any single Task.
 
 ### 3.3 Layer
 
@@ -125,12 +125,12 @@ This subsection extends 3.2 (Object) with the data-flow semantics that govern ho
 The Object's owner is canonical. Specifically:
 
 - The Object lives in the owner's home layer, on the owner's stack.
-- The owner's Tesherra instance holds the authoritative state.
+- The owner's Mesherra instance holds the authoritative state.
 - Any other agent that "sees" the Object sees it through a **promotion** — a scoped, time-bounded, possibly revocable view authorized by the owner's policy.
 
 This single rule is what makes scoped disclosure tractable. If everyone agrees the owner is the source, then "what is the receiver allowed to see" is a question the owner's policy answers, and enforcement happens at one well-defined point: the owner's airlock.
 
-Architectural consequence: Tesherra is explicitly *not* a CRDT, shared-state, or multi-writer system. We do not solve eventual consistency, multi-writer conflict resolution, or "whose copy is canonical." In our model there is one canonical state per Object on the owner's stack; every viewer sees a derivative.
+Architectural consequence: Mesherra is explicitly *not* a CRDT, shared-state, or multi-writer system. We do not solve eventual consistency, multi-writer conflict resolution, or "whose copy is canonical." In our model there is one canonical state per Object on the owner's stack; every viewer sees a derivative.
 
 **Reference promotion (default, preferred)**
 
@@ -223,17 +223,17 @@ The owner-is-canonical commitment, however, must be encoded from day one. Every 
 
 A2A's AgentCard at `/.well-known/agent-card.json` declares identity and supported auth schemes (mTLS, OAuth2, OIDC). It does **not** prove that the agent at that URL genuinely represents the human or organization it claims.
 
-Tesherra provides a **verified directory**: when an agent encounters a remote AgentCard, Tesherra can answer "yes, this URL belongs to the principal named X, here is the cryptographic proof."
+Mesherra provides a **verified directory**: when an agent encounters a remote AgentCard, Mesherra can answer "yes, this URL belongs to the principal named X, here is the cryptographic proof."
 
 **Implementation strategy:**
 
-- **Initial centralized trust root.** Tesherra hosts the directory. Similar to Plaid's initial approach to bank trust.
+- **Initial centralized trust root.** Mesherra hosts the directory. Similar to Plaid's initial approach to bank trust.
 - **Decentralized-ready data structures.** Schemas designed so a migration to PKI, web-of-trust, or other decentralized models later is not a rewrite.
-- **Wraps incoming AgentCard reads.** Every time an agent reads a remote card, Tesherra inserts a directory lookup + signature check.
+- **Wraps incoming AgentCard reads.** Every time an agent reads a remote card, Mesherra inserts a directory lookup + signature check.
 
 ### 4.2 Scoped disclosure
 
-A2A's `SendMessage` will transmit whatever Parts the sender provides. Tesherra wraps the send path with a **policy enforcement gateway**:
+A2A's `SendMessage` will transmit whatever Parts the sender provides. Mesherra wraps the send path with a **policy enforcement gateway**:
 
 - Inspects every outgoing Part against the user's policy.
 - Blocks, scrubs, or scopes Parts that exceed authorized disclosure.
@@ -250,23 +250,23 @@ A2A's `SendMessage` will transmit whatever Parts the sender provides. Tesherra w
 
 ### 4.3 Provenance / attestation
 
-At Task completion, Tesherra produces a **structured provenance record**:
+At Task completion, Mesherra produces a **structured provenance record**:
 
 - Both parties' verified identities (resolved through the directory)
 - The authorization chain on each side (which policy clauses permitted what)
 - A hash of the Task's relevant input and output
-- A signature from each party's Tesherra principal
+- A signature from each party's Mesherra principal
 
 **Storage:**
 
 - Embedded in A2A `Artifact.metadata` so it travels with the result.
-- Mirrored to an append-only Tesherra-side log keyed by `task.id` and `context_id`.
+- Mirrored to an append-only Mesherra-side log keyed by `task.id` and `context_id`.
 
 **Compounding trust:** future Tasks can reference prior provenance via A2A's `Message.reference_task_ids`. This is how the trust graph accretes without us building a separate social network — every interaction's provenance becomes a node in the implicit graph. Note: in v0, provenance is primarily forensic (audit and dispute resolution); compounding-trust uses such as reputation scoring and conditional acceptance based on history emerge in v1+ as the graph fills out (see 3.6 for the full framing).
 
 ### 4.4 Policy capture (zeroth piece)
 
-Layers 1–3 require structured policy to verify against. Tesherra provides:
+Layers 1–3 require structured policy to verify against. Mesherra provides:
 
 - A **policy schema** — machine-readable, signed by the user.
 - A **capture flow** — translates user intent into structured policy (UI lives in consumers; the schema lives here).
@@ -278,11 +278,11 @@ Three trust zones, hard-separated by design and by code.
 
 ### 5.1 Internal (within the user's trust boundary)
 
-The user's own agents (butler, domain agents, leaf agents) talk to each other freely. Trust by construction. No handshake required. Tesherra is mostly **absent** here — it is a *boundary* layer.
+The user's own agents (butler, domain agents, leaf agents) talk to each other freely. Trust by construction. No handshake required. Mesherra is mostly **absent** here — it is a *boundary* layer.
 
 ### 5.2 Known external
 
-Counterparts the user has pre-authorized: a friend's agent, a known vendor's agent, an institution like a bank. Tesherra mediates:
+Counterparts the user has pre-authorized: a friend's agent, a known vendor's agent, an institution like a bank. Mesherra mediates:
 
 - Identity verified against the directory on every interaction
 - Disclosure scoped per policy
@@ -291,7 +291,7 @@ Counterparts the user has pre-authorized: a friend's agent, a known vendor's age
 
 ### 5.3 Open mesh
 
-Strangers on the public A2A network with no prior relationship. Tesherra mediates with maximum verification, minimum disclosure, and reputation lookup. Some interactions may be policy-forbidden in this zone (e.g., no transactions above a threshold with unverified counterparts).
+Strangers on the public A2A network with no prior relationship. Mesherra mediates with maximum verification, minimum disclosure, and reputation lookup. Some interactions may be policy-forbidden in this zone (e.g., no transactions above a threshold with unverified counterparts).
 
 ## 6. The airlock pattern
 
@@ -306,22 +306,22 @@ The same component enforces outbound privacy (scoped disclosure) and inbound att
 
 **Implementation consequence:** the boundary envoy is intentionally "dumb." It holds only its scoped task. If it needs more context mid-negotiation, it returns to the butler via A2A's `INPUT_REQUIRED` state and the butler decides whether to grant additional scope. This trades fluidity for security.
 
-## 7. A2A Task as the unit of Tesherra interaction
+## 7. A2A Task as the unit of Mesherra interaction
 
 A single negotiation between two parties is modeled as one A2A `Task`:
 
 - `context_id` ties multi-turn exchanges together.
-- `Message.role` (`USER` / `AGENT`) tracks turn-taking; Tesherra also attaches its own verified principal identity.
+- `Message.role` (`USER` / `AGENT`) tracks turn-taking; Mesherra also attaches its own verified principal identity.
 - `Part` carries the actual proposal (candidate slot, scoped document view, contract clause).
 - `TaskState.INPUT_REQUIRED` maps onto the airlock pattern: envoy needs more scope from butler, or human needs to make a judgment call the agent isn't authorized for.
 - `TaskState.AUTH_REQUIRED` maps onto re-verification: identity needs to be re-asserted before proceeding.
-- `TaskState.COMPLETED` triggers Tesherra's attestation: provenance record signed and embedded in the final `Artifact.metadata`.
+- `TaskState.COMPLETED` triggers Mesherra's attestation: provenance record signed and embedded in the final `Artifact.metadata`.
 
-**Object-mediated interaction.** Every Tesherra interaction is *about* an Object: a calendar being scheduled against, a contract being negotiated, a procurement order being formed, a document being reviewed. The Object is both the **topic** (what the interaction concerns) and the **context anchor** (what carries policy attachment, scope spec, schema reference, and residue target). A pure agent-to-agent conversation with no Object reference has no policy attachment point and no provenance target; such interactions are out of scope for Tesherra. In practice, every A2A `Task` initiated through Tesherra carries an Object reference (an existing Object being acted upon, or a new Object being constructed by the negotiation itself), and the payload schema names which Object class is being acted on. Agents do not negotiate in the abstract; they negotiate *over Objects*.
+**Object-mediated interaction.** Every Mesherra interaction is *about* an Object: a calendar being scheduled against, a contract being negotiated, a procurement order being formed, a document being reviewed. The Object is both the **topic** (what the interaction concerns) and the **context anchor** (what carries policy attachment, scope spec, schema reference, and residue target). A pure agent-to-agent conversation with no Object reference has no policy attachment point and no provenance target; such interactions are out of scope for Mesherra. In practice, every A2A `Task` initiated through Mesherra carries an Object reference (an existing Object being acted upon, or a new Object being constructed by the negotiation itself), and the payload schema names which Object class is being acted on. Agents do not negotiate in the abstract; they negotiate *over Objects*.
 
 ## 8. Payload structure and schema-based messaging
 
-Tesherra interactions carry structured, schema-defined payloads by default. Free-form text is a fallback, not the norm. This decision shapes Policy Engine design, Provenance Ledger design, and the Schema Registry component (see section 13.11).
+Mesherra interactions carry structured, schema-defined payloads by default. Free-form text is a fallback, not the norm. This decision shapes Policy Engine design, Provenance Ledger design, and the Schema Registry component (see section 13.11).
 
 ### 8.1 Default: `Part.data`, not `Part.text`
 
@@ -349,7 +349,7 @@ Examples:
 
 Publishers are principals verified through the Identity Directory. A schema is signed by its publisher's key; any receiver can verify the schema is genuinely from the claimed source before accepting payloads against it.
 
-**Tesherra does not define schemas.** Consumers do. Tesherra provides the registry and the verification mechanism.
+**Mesherra does not define schemas.** Consumers do. Mesherra provides the registry and the verification mechanism.
 
 ### 8.3 Canonical encoding
 
@@ -361,11 +361,11 @@ Structured payloads use JSON Canonicalization Scheme (RFC 8785, JCS) or equivale
 
 ### 8.4 Schema Registry
 
-A Tesherra service, sibling to the Identity Directory. See section 13.11 for the component-level spec. Functionally:
+A Mesherra service, sibling to the Identity Directory. See section 13.11 for the component-level spec. Functionally:
 
 - Consumers publish schemas, signed by their publisher principal.
 - Other consumers resolve schemas by ID and version.
-- Trust is rooted in the publisher's verified principal, not in Tesherra-the-company.
+- Trust is rooted in the publisher's verified principal, not in Mesherra-the-company.
 
 v0 centralized, future federated; same trust migration path as the Identity Directory.
 
@@ -373,7 +373,7 @@ v0 centralized, future federated; same trust migration path as the Identity Dire
 
 - **Major version in URI.** Breaking changes mean a new schema (`-v2`), not a mutation of v1.
 - **Minor additions allowed without URI bump** — new optional fields only. Receivers ignore unknown fields.
-- **Receivers declare accepted versions in their AgentCard** as a Tesherra extension field, so senders can negotiate.
+- **Receivers declare accepted versions in their AgentCard** as a Mesherra extension field, so senders can negotiate.
 - **Schemas are content-addressed at publication.** Each published version has a stable hash; the registry can confirm "this is the schema I published" without depending on URI alone.
 
 ### 8.6 Field-level policy
@@ -423,37 +423,37 @@ The metaphor extends through the product:
 
 ## 10. First consumer: MeshyCal
 
-A scheduling product where two users' agents negotiate a meeting time. Each agent holds its user's calendar privately; only candidate slots cross the boundary; the final agreed time is recorded with attested provenance. Demonstrates all three Tesherra pieces in the smallest possible use case.
+A scheduling product where two users' agents negotiate a meeting time. Each agent holds its user's calendar privately; only candidate slots cross the boundary; the final agreed time is recorded with attested provenance. Demonstrates all three Mesherra pieces in the smallest possible use case.
 
-**MeshyCal is a Delegation, not a primitive.** It is a published package — the agent-era equivalent of an application — that uses Tesherra primitives to deliver an end-user experience for the scheduling domain. The Delegation packages four things, each of which slots into a different primitive in the user's stack at install time:
+**MeshyCal is a Delegation, not a primitive.** It is a published package — the agent-era equivalent of an application — that uses Mesherra primitives to deliver an end-user experience for the scheduling domain. The Delegation packages four things, each of which slots into a different primitive in the user's stack at install time:
 
 - **Object class definitions** — Calendar, Meeting, and `meshycal.scheduling/proposal-v1` (and successors), registered in the Schema Registry.
 - **A scheduling Agent** — a domain agent that runs under each user's butler, carrying the domain logic for reading calendars and proposing slots.
 - **Policy templates** — defaults like "share candidate slots, never share titles" merged into the user's signed policy on install.
 - **A mobile/web UI** — the user-facing renderer for set-points, exceptions, and confirmations; disposable as ambient/voice/AR surfaces emerge.
 
-**The four-component shape is the Delegation integration contract.** It is not specific to MeshyCal — it is the contract Tesherra defines for *any* Delegation. Every Delegation conforms to this shape; the components themselves are bespoke per domain. A Contract Delegation has contract-clause schemas and a negotiation Agent; a Procurement Delegation has purchase-order schemas and a procurement Agent; both still package the same four kinds of components. This uniformity is what makes Delegations interchangeable plug-ins at the Tesherra level — the user's butler-equivalent can host any conforming Delegation without knowing anything about its domain.
+**The four-component shape is the Delegation integration contract.** It is not specific to MeshyCal — it is the contract Mesherra defines for *any* Delegation. Every Delegation conforms to this shape; the components themselves are bespoke per domain. A Contract Delegation has contract-clause schemas and a negotiation Agent; a Procurement Delegation has purchase-order schemas and a procurement Agent; both still package the same four kinds of components. This uniformity is what makes Delegations interchangeable plug-ins at the Mesherra level — the user's butler-equivalent can host any conforming Delegation without knowing anything about its domain.
 
 When two MeshyCal users meet, what actually happens: each user's butler dispatches to its MeshyCal scheduling Agent; the agents negotiate over the shared Object class (proposal payloads against the registered schema); the result is an agreed time recorded with attested provenance on both sides. The "MeshyCal app" the users see is one of the four pieces (the UI); the other three are the Delegation's contributions to each user's primitive layer.
 
-**MeshyCal is our test rig, not our market.** The market for Tesherra is contracts, transactions, regulated B2B coordination — domains where being wrong is expensive and trust is materially valued. Scheduling is low-stakes by comparison and only weakly exercises identity and provenance. MeshyCal proves Tesherra works mechanically, but it does not prove Tesherra is necessary; the necessity story lives in the higher-stakes verticals. We build MeshyCal because it gives us the fastest feedback loop on the layer, not because it is the largest addressable customer.
+**MeshyCal is our test rig, not our market.** The market for Mesherra is contracts, transactions, regulated B2B coordination — domains where being wrong is expensive and trust is materially valued. Scheduling is low-stakes by comparison and only weakly exercises identity and provenance. MeshyCal proves Mesherra works mechanically, but it does not prove Mesherra is necessary; the necessity story lives in the higher-stakes verticals. We build MeshyCal because it gives us the fastest feedback loop on the layer, not because it is the largest addressable customer.
 
-**Sibling repo.** Not part of Tesherra. The dependency arrow runs one way: `MeshyCal → Tesherra`. Never reverse.
+**Sibling repo.** Not part of Mesherra. The dependency arrow runs one way: `MeshyCal → Mesherra`. Never reverse.
 
 **Why it's the right first consumer:**
 
 - Calendar provides one-click context to fund a fresh agent (universal, permissioned via OAuth, rich).
 - Scheduling is a coordination pain everyone understands.
 - The privacy asymmetry is real (neither side wants to expose their calendar).
-- The smallest negotiation that exercises all three Tesherra layers.
+- The smallest negotiation that exercises all three Mesherra layers.
 
-**The hard part for MeshyCal specifically:** the invitee experience. To beat Calendly's one-sided-link cold-start advantage, the invited counterpart needs a near-zero-friction guest agent. Designing this flow is MeshyCal's problem, not Tesherra's — but Tesherra must support short-lived, scoped guest principals as a primitive.
+**The hard part for MeshyCal specifically:** the invitee experience. To beat Calendly's one-sided-link cold-start advantage, the invited counterpart needs a near-zero-friction guest agent. Designing this flow is MeshyCal's problem, not Mesherra's — but Mesherra must support short-lived, scoped guest principals as a primitive.
 
 ## 11. Threat model
 
-Tesherra makes specific security guarantees and explicitly does not make others. This section names both, so design decisions stay scoped and marketing stays honest.
+Mesherra makes specific security guarantees and explicitly does not make others. This section names both, so design decisions stay scoped and marketing stays honest.
 
-### 11.1 What Tesherra defends against (in scope)
+### 11.1 What Mesherra defends against (in scope)
 
 | Attack | Defense |
 |---|---|
@@ -464,54 +464,54 @@ Tesherra makes specific security guarantees and explicitly does not make others.
 | Acceptance from unverified senders | Inbound Gateway requires verified identity before any delivery |
 | Tampering with agreed terms post-hoc | Signed Artifact with provenance hash; both sides hold matching signatures |
 | Repudiation ("I never agreed to that") | Provenance Ledger + counter-signed Artifacts |
-| MITM on the A2A wire | A2A-mandated mTLS plus Tesherra message-level signing (defense in depth) |
+| MITM on the A2A wire | A2A-mandated mTLS plus Mesherra message-level signing (defense in depth) |
 | Cross-user privilege escalation | Zone separation; airlock pattern; no path from one user's external traffic to another user's internal agents |
 | Schema spoofing | Schemas signed by verified publisher principal; receivers verify before accepting payloads |
 | Fetch endpoint abuse under reference promotion (DoS via repeated fetches, resource exhaustion) | Per-principal rate limiting on the owner's airlock; configurable fetch quotas in policy; circuit breakers; receiver-side caching of handle data to minimize fetches |
 
 **Note on tracking via fetch timing:** the reference promotion model has an inherent property that the owner sees every read by the receiver (because each read is a fetch to the owner's airlock). This is the cost of revocability and policy enforcement at the owner's side. It is a tradeoff of the model, not a defendable attack. Receivers concerned about tracking should request copy promotion where appropriate; owners concerned about leaking activity metadata to receivers should be aware that the reverse property does not hold (the receiver does not see the owner's reads).
 
-### 11.2 What Tesherra does NOT defend against (out of scope)
+### 11.2 What Mesherra does NOT defend against (out of scope)
 
 | Attack | Why out of scope | Where the defense lives |
 |---|---|---|
 | Compromised user device (rootkit, key extraction) | Hardware/OS security problem | Platform vendor, hardware enclaves, key-store best practices |
-| Compromised LLM (prompt injection, jailbreak) | Tesherra verifies identity, not alignment | Consumer-side LLM safety, sandboxing, constrained tool use |
-| Social engineering of the human | Tesherra enforces the user's authorization; cannot second-guess them | User-side: clear policy UI, friction on dangerous authorizations |
+| Compromised LLM (prompt injection, jailbreak) | Mesherra verifies identity, not alignment | Consumer-side LLM safety, sandboxing, constrained tool use |
+| Social engineering of the human | Mesherra enforces the user's authorization; cannot second-guess them | User-side: clear policy UI, friction on dangerous authorizations |
 | Network-level attacks (BGP hijack, DNS poison) | Below the protocol | Standard internet security: HSTS, DNSSEC, cert pinning |
 | Quantum cryptanalysis | v0 uses standard PKI vulnerable to sufficient quantum computers | Migrate to post-quantum schemes as standards mature; tracked as design question |
 | Covert channels in policy-allowed fields | Cannot inspect semantics, only structure | Consumer-side schema design; minimize free-form fields |
 | Denial of service | Mostly an ops problem | Rate limiting at the Gateway; infrastructure-level DDoS protection |
 | Long-term key compromise | Inevitable eventually | Key rotation (lifecycle); short-lived session keys; eventual threshold schemes |
-| Insider attack on Tesherra itself | v0 trust root is us, by design | Mitigated by future decentralized directory migration |
+| Insider attack on Mesherra itself | v0 trust root is us, by design | Mitigated by future decentralized directory migration |
 
 ### 11.3 Trust assumptions
 
-For Tesherra's guarantees to hold, the following must be true:
+For Mesherra's guarantees to hold, the following must be true:
 
 1. The user's signing key is genuinely controlled by the user.
 2. The user's device running their butler is not fully compromised at the OS level.
 3. The user's LLM agent is reasonably aligned and not jailbroken.
 4. A2A's transport security (mTLS / HTTPS) is properly configured by both parties.
-5. In v0, the Tesherra service itself (operating the Directory, Schema Registry, and Ledger) is not adversarial.
+5. In v0, the Mesherra service itself (operating the Directory, Schema Registry, and Ledger) is not adversarial.
 
-If any of these is false, Tesherra's guarantees degrade or fail. We are explicit about this rather than claiming otherwise.
+If any of these is false, Mesherra's guarantees degrade or fail. We are explicit about this rather than claiming otherwise.
 
 ### 11.4 Defense in depth
 
-Even where Tesherra cannot fully defend, the layered design limits blast radius:
+Even where Mesherra cannot fully defend, the layered design limits blast radius:
 
 - A compromised LLM agent still cannot exceed the user's signed policy bounds (Policy Engine still enforces).
 - A compromised counterpart still cannot extract more than was scoped (Outbound Gateway still scopes outbound disclosure).
-- A compromised Tesherra service in v0 still cannot forge user signatures (the user's signing key is local to their device).
-- A future migration to a decentralized directory removes Tesherra-the-company from the trust root entirely, so even a fully-compromised Tesherra becomes survivable.
+- A compromised Mesherra service in v0 still cannot forge user signatures (the user's signing key is local to their device).
+- A future migration to a decentralized directory removes Mesherra-the-company from the trust root entirely, so even a fully-compromised Mesherra becomes survivable.
 
 The architecture is intentionally designed so that no single failure compromises everything.
 
 ## 12. Build discipline
 
-1. **The trust layer must not import from any consumer.** No MeshyCal-specific code in Tesherra. Ever.
-2. **Domain-specific logic lives in consumer agents**, not in Tesherra.
+1. **The trust layer must not import from any consumer.** No MeshyCal-specific code in Mesherra. Ever.
+2. **Domain-specific logic lives in consumer agents**, not in Mesherra.
 3. **The renderer is disposable.** Build the principal model as the source of truth. Mobile, web, voice, future AR are all renderers over the same core.
 4. **Use the A2A SDK as the foundation.** Do not reimplement transport, discovery, or task lifecycle. `a2a-sdk` (Python) or `@a2a-js/sdk` (JS/TS) are the starting points.
 5. **Centralized identity directory first, decentralized-ready schemas.** Ship faster, design to migrate later.
@@ -530,7 +530,7 @@ The architecture is intentionally designed so that no single failure compromises
 
 9. **No real user data anywhere in the repository.** No real names, emails, calendar entries, organization names, phone numbers, or any other identifying information in fixtures, tests, seed data, examples, or documentation. Use generated synthetic data only. This is a hard rule from day one — once real data lands in git history, it is effectively permanent. When in doubt, generate.
 
-10. **Don't abstract MeshyCal prematurely.** MeshyCal is the first Delegation, hand-crafted against Tesherra's raw SDK. Resist the urge to extract reusable Delegation-authoring helpers from MeshyCal before a second Delegation exists. Two examples is the minimum from which useful templates can be derived; one is just a special case in disguise. A "Delegation Authoring SDK" (a `tesherra create-delegation` CLI, a base Delegation class, standard project layout) should emerge from real comparison between Delegation #1 and Delegation #2, not from speculation inside MeshyCal. Resisting this temptation is what keeps MeshyCal honest as a domain-specific product and Tesherra honest as a domain-agnostic substrate.
+10. **Don't abstract MeshyCal prematurely.** MeshyCal is the first Delegation, hand-crafted against Mesherra's raw SDK. Resist the urge to extract reusable Delegation-authoring helpers from MeshyCal before a second Delegation exists. Two examples is the minimum from which useful templates can be derived; one is just a special case in disguise. A "Delegation Authoring SDK" (a `mesherra create-delegation` CLI, a base Delegation class, standard project layout) should emerge from real comparison between Delegation #1 and Delegation #2, not from speculation inside MeshyCal. Resisting this temptation is what keeps MeshyCal honest as a domain-specific product and Mesherra honest as a domain-agnostic substrate.
 
 ## 13. Component inventory
 
@@ -540,11 +540,11 @@ See `docs/DIAGRAMS.md` for the visual reference (internal architecture, outbound
 
 ### 13.1 SDK / Public API
 
-The only surface consumers (MeshyCal, future apps) interact with. Everything else in Tesherra is internal.
+The only surface consumers (MeshyCal, future apps) interact with. Everything else in Mesherra is internal.
 
 Core operations:
 
-- `init(user_id, config)` — initialize Tesherra for a user
+- `init(user_id, config)` — initialize Mesherra for a user
 - `register_principal()` — create or refresh this user's principal record in the directory
 - `send_to(peer, parts, opts)` — route an outgoing message through the outbound gateway
 - `on_message(handler)` — register a callback for inbound messages
@@ -608,7 +608,7 @@ Operations:
 - `register(principal, AgentCard)` → signed registration record
 - `attest(principal_a, principal_b)` → "these two are verified peers" assertion
 
-v0: centralized, Tesherra-hosted. Trust root is our organizational signing key.
+v0: centralized, Mesherra-hosted. Trust root is our organizational signing key.
 
 Future: pluggable backend designed to swap to decentralized (PKI, web-of-trust, transparency log) without rewriting consumers.
 
@@ -620,20 +620,20 @@ Properties:
 
 - **User-owned**: only the user's signing key can produce a valid update
 - **Versioned**: every change is a new signed version with a monotonically increasing version number
-- **Local-first**: stored on the user's device, replicated to Tesherra-hosted backup with end-to-end encryption
-- **Schema-validated**: every version must match the policy schema for the Tesherra version it was signed against
+- **Local-first**: stored on the user's device, replicated to Mesherra-hosted backup with end-to-end encryption
+- **Schema-validated**: every version must match the policy schema for the Mesherra version it was signed against
 
 ### 13.7 Directory Store
 
 Backing storage for the Identity Directory.
 
-v0: relational database (Postgres or equivalent), Tesherra-hosted. Each row is a principal record with signed AgentCard hash, public key, and claim metadata.
+v0: relational database (Postgres or equivalent), Mesherra-hosted. Each row is a principal record with signed AgentCard hash, public key, and claim metadata.
 
 Future: pluggable backend for decentralized models.
 
 ### 13.8 Provenance Ledger
 
-The append-only signed log of every Tesherra interaction.
+The append-only signed log of every Mesherra interaction.
 
 Properties:
 
@@ -658,16 +658,16 @@ Provides:
 
 ### 13.10 A2A SDK Adapter
 
-The only module in Tesherra that imports `a2a-sdk`.
+The only module in Mesherra that imports `a2a-sdk`.
 
 Responsibilities:
 
 - Wrap A2A's `SendMessage`, `GetTask`, `SubscribeToTask`, push notifications
-- Translate Tesherra's envelope format ↔ A2A's `Message`, `Part`, `Artifact`
-- Map A2A `TaskState` transitions onto Tesherra events (e.g., `INPUT_REQUIRED` → butler escalation, `AUTH_REQUIRED` → identity re-verification)
+- Translate Mesherra's envelope format ↔ A2A's `Message`, `Part`, `Artifact`
+- Map A2A `TaskState` transitions onto Mesherra events (e.g., `INPUT_REQUIRED` → butler escalation, `AUTH_REQUIRED` → identity re-verification)
 - Embed signed provenance metadata into A2A `Artifact.metadata` on task completion
 
-Strict isolation: if A2A changes, only this module changes. No other module in Tesherra imports `a2a-sdk` or references A2A types directly.
+Strict isolation: if A2A changes, only this module changes. No other module in Mesherra imports `a2a-sdk` or references A2A types directly.
 
 ### 13.11 Schema Registry
 
@@ -682,7 +682,7 @@ Operations:
 
 Trust model: schemas are signed by their publisher's principal (verified through Identity Directory). Receivers verify a schema is authentic before accepting payloads against it.
 
-v0: centralized, Tesherra-hosted. Same migration path to federated/decentralized as the Identity Directory.
+v0: centralized, Mesherra-hosted. Same migration path to federated/decentralized as the Identity Directory.
 
 See section 8 for the broader schema-based messaging model that this component supports.
 

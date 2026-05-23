@@ -15,7 +15,7 @@ Trust model: schemas are signed by their publisher's principal (verified
 through Identity Directory). Receivers verify a schema is authentic before
 accepting payloads against it.
 
-v0: centralized, Tesherra-hosted. Same migration path to federated /
+v0: centralized, Mesherra-hosted. Same migration path to federated /
 decentralized as the Identity Directory.
 
 See ARCHITECTURE.md section 8 for the broader schema-based messaging model.

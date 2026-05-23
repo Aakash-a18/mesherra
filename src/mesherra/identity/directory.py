@@ -9,7 +9,7 @@ Operations (per architecture):
     register(principal, AgentCard)   -> signed registration record
     attest(principal_a, principal_b) -> "these two are verified peers"
 
-v0: centralized, Tesherra-hosted. Trust root is our organizational signing key.
+v0: centralized, Mesherra-hosted. Trust root is our organizational signing key.
 Future: pluggable backend designed to swap to decentralized (PKI, web-of-trust,
 transparency log) without rewriting consumers.
 

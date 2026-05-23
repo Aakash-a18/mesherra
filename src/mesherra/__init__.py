@@ -1,6 +1,6 @@
-"""Tesherra: trust layer for agent-to-agent (A2A) interaction.
+"""Mesherra: trust layer for agent-to-agent (A2A) interaction.
 
-Public surface lives in ``tesherra.sdk``. Internal components match the
+Public surface lives in ``mesherra.sdk``. Internal components match the
 component inventory in ``docs/ARCHITECTURE.md`` section 13.
 
 Status: pre-alpha. All runtime calls currently raise NotImplementedError.

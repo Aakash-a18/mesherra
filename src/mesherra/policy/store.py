@@ -8,9 +8,9 @@ Properties (per architecture):
 - User-owned: only the user's signing key can produce a valid update
 - Versioned: every change is a new signed version with a monotonically
   increasing version number
-- Local-first: stored on the user's device, replicated to Tesherra-hosted
+- Local-first: stored on the user's device, replicated to Mesherra-hosted
   backup with end-to-end encryption
-- Schema-validated: every version matches the policy schema for the Tesherra
+- Schema-validated: every version matches the policy schema for the Mesherra
   version it was signed against
 
 Status: scaffolding only.

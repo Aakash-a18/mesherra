@@ -2,7 +2,7 @@
 
 Implements ARCHITECTURE.md section 13.8.
 
-The append-only signed log of every Tesherra interaction.
+The append-only signed log of every Mesherra interaction.
 
 Properties (per architecture):
 - Append-only: entries cannot be modified or deleted, only appended
@@ -29,7 +29,7 @@ from typing import Any
 
 
 class ProvenanceLedger:
-    """Append-only signed ledger of Tesherra interactions."""
+    """Append-only signed ledger of Mesherra interactions."""
 
     def __init__(self) -> None:
         raise NotImplementedError

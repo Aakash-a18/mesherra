@@ -1,4 +1,4 @@
-"""Tesherra Schema Registry.
+"""Mesherra Schema Registry.
 
 Per ARCHITECTURE.md sections 8, 13.11.
 

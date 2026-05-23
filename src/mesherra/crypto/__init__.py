@@ -1,4 +1,4 @@
-"""Tesherra cryptographic primitives.
+"""Mesherra cryptographic primitives.
 
 Per ARCHITECTURE.md section 13.9.
 

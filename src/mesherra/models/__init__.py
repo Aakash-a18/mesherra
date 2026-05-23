@@ -1,4 +1,4 @@
-"""Tesherra primitive models: Agent, Object, Layer, Handshake, Policy, Residue, Promotion.
+"""Mesherra primitive models: Agent, Object, Layer, Handshake, Policy, Residue, Promotion.
 
 Per ARCHITECTURE.md section 3 (Core concepts) and section 3.7 (Object data flow).
 

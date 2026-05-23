@@ -1,4 +1,4 @@
-# Tesherra tests
+# Mesherra tests
 
 Tests live alongside the code they exercise. Phase 1 (provenance vertical slice) is the first round; Phase 2 (identity verification) and Phase 3 (scoped disclosure) follow per `docs/ARCHITECTURE.md` section 12.
 

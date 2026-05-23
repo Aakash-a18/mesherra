@@ -1,9 +1,9 @@
-"""Tesherra SDK / Public API.
+"""Mesherra SDK / Public API.
 
 Implements ARCHITECTURE.md section 13.1.
 
 The only surface consumers (MeshyCal, future Delegations) interact with.
-Everything else in Tesherra is internal.
+Everything else in Mesherra is internal.
 
 Core operations (per ARCHITECTURE.md 13.1):
     init(user_id, config)
@@ -24,14 +24,14 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
-class Tesherra:
+class Mesherra:
     """Public SDK surface. Wraps the internal gateways, decision services, and adapter.
 
     See ARCHITECTURE.md section 13.1 for the full operations list.
     """
 
     def __init__(self, user_id: str, config: dict[str, Any]) -> None:
-        raise NotImplementedError("Tesherra is in pre-alpha; SDK surface not yet implemented.")
+        raise NotImplementedError("Mesherra is in pre-alpha; SDK surface not yet implemented.")
 
     def register_principal(self) -> None:
         raise NotImplementedError

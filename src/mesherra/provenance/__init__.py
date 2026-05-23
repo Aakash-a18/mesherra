@@ -1,4 +1,4 @@
-"""Tesherra provenance: append-only signed ledger of every interaction.
+"""Mesherra provenance: append-only signed ledger of every interaction.
 
 Per ARCHITECTURE.md sections 3.6, 4.3, 13.8.
 

@@ -1,4 +1,4 @@
-# Tesherra Strategy
+# Mesherra Strategy
 
 This document holds longer-arc strategic thinking, product positioning, and forward direction that sit one level above the architecture spec. Where `docs/ARCHITECTURE.md` says "what we build and how it works," this document says "where this is going and why it matters." Architecture is the ground truth for the system. Strategy is the ground truth for *why we are building it this way*.
 
@@ -6,7 +6,7 @@ This document holds longer-arc strategic thinking, product positioning, and forw
 
 The agentic layer — A2A as transport, agents as the new addressable principals — is becoming what TCP/IP and HTTP were to the previous era. New economies, new infrastructure, and new categories of work will be built on this layer. The platforms that own the trust and identity primitives for this new layer will look back on this moment the way Plaid, Stripe, and DocuSign look back on the early commercial web: boring infrastructure that captured enormous value because everything had to route through it.
 
-Tesherra is one of those primitives.
+Mesherra is one of those primitives.
 
 ## 2. The reframe: Delegations are the agent-era unit of application
 
@@ -23,7 +23,7 @@ The user does not navigate to a calendar app. The user has *granted a Delegation
 
 This is not a future redesign. It is a *frame* for what the architecture is already doing.
 
-## 3. Tesherra as substrate, marketplace, or both
+## 3. Mesherra as substrate, marketplace, or both
 
 The architecture (section 13.11) already has the technical primitive for a marketplace: the Schema Registry. It is currently scoped to schema definitions, but the logical extension is straightforward:
 
@@ -45,11 +45,11 @@ The strategic question is whether to lean into the marketplace dimension or stay
 
 ## 4. Three time horizons
 
-**Short term (v0 – v1, the first year or two).** Tesherra is the trust layer on top of A2A. MeshyCal is the first consumer and the test rig. Schema Registry exists in service of policy enforcement and provenance hashing. We do not market the marketplace dimension; we do not necessarily say it out loud to customers. The business is: be the verify-scope-attest layer for cross-boundary agent interaction.
+**Short term (v0 – v1, the first year or two).** Mesherra is the trust layer on top of A2A. MeshyCal is the first consumer and the test rig. Schema Registry exists in service of policy enforcement and provenance hashing. We do not market the marketplace dimension; we do not necessarily say it out loud to customers. The business is: be the verify-scope-attest layer for cross-boundary agent interaction.
 
-**Medium term (v1 – v2, the next couple of years).** Tesherra-the-trust-layer becomes Tesherra-the-trust-layer-plus-Delegation-Registry. We publish a small number of Delegations ourselves (Calendar/Scheduling, Contract Negotiation, Procurement) as canonical examples and to seed real consumer behavior. The registry hosts our own Delegations plus a handful of trusted partner Delegations. Network effects begin: every new Delegation makes the substrate more valuable to existing users with butlers, which makes the substrate more attractive to new Delegation publishers.
+**Medium term (v1 – v2, the next couple of years).** Mesherra-the-trust-layer becomes Mesherra-the-trust-layer-plus-Delegation-Registry. We publish a small number of Delegations ourselves (Calendar/Scheduling, Contract Negotiation, Procurement) as canonical examples and to seed real consumer behavior. The registry hosts our own Delegations plus a handful of trusted partner Delegations. Network effects begin: every new Delegation makes the substrate more valuable to existing users with butlers, which makes the substrate more attractive to new Delegation publishers.
 
-**Long term (v2+, three or more years).** The Delegation Registry opens to third-party publishers. Now Tesherra is the substrate for the agentic web's distribution layer: any developer can publish a Delegation, the registry hosts the signed bundle, and users (via their butlers) can grant new Delegations the way they used to install apps. Tesherra captures value as both the trust layer (per-transaction) and the marketplace (distribution, ranking, search, verification badges). This is the largest version of the business and the version that justifies the architecture commitments we made at v0.
+**Long term (v2+, three or more years).** The Delegation Registry opens to third-party publishers. Now Mesherra is the substrate for the agentic web's distribution layer: any developer can publish a Delegation, the registry hosts the signed bundle, and users (via their butlers) can grant new Delegations the way they used to install apps. Mesherra captures value as both the trust layer (per-transaction) and the marketplace (distribution, ranking, search, verification badges). This is the largest version of the business and the version that justifies the architecture commitments we made at v0.
 
 ## 5. What this means for MeshyCal
 
@@ -59,7 +59,7 @@ Under the substrate-only frame, MeshyCal is the "first consumer." Under the mark
 
 That reframe sharpens the role: MeshyCal is not trying to be a standalone scheduling product competing with Calendly. It is a reference implementation of the Delegation pattern, optimized to demonstrate that:
 
-1. A non-trivial Delegation — covering multiple Object classes (Calendar, Meeting, Proposal) plus agent code, policy templates, and UI — can be published, distributed, and adopted via Tesherra.
+1. A non-trivial Delegation — covering multiple Object classes (Calendar, Meeting, Proposal) plus agent code, policy templates, and UI — can be published, distributed, and adopted via Mesherra.
 2. Users with butler agents can grant a Delegation and then interact across boundaries fluidly without operating an application directly.
 3. The trust layer pays its keep (privacy-preserving negotiation, verifiable agreements).
 
@@ -82,7 +82,7 @@ These are upstream of the architecture's open design questions (ARCHITECTURE.md 
 - **Do we publish MeshyCal as open source eventually?** Open-sourcing the first reference Delegation would make it easier for third parties to build their own. It might also commoditize MeshyCal itself. Tension worth carrying.
 - **What is the value capture model?** Per-interaction fees (we are the toll booth), subscription on butler service, marketplace distribution cuts, enterprise verification tier. Each implies a different prioritization of what we harden first.
 - **How do we avoid becoming the platform that gets disintermediated?** If we open the Delegation Registry too early, third parties may host their own and route around us. If we close it too late, we lose the marketplace position to a competitor that opens earlier.
-- **When does the Delegation Authoring SDK emerge?** Today MeshyCal is hand-built against Tesherra's raw SDK. A reusable scaffolding layer for new Delegations (a `tesherra create-delegation` CLI, a base `Delegation` class, standard project structure, signing and registration helpers) is premature with only one example. It should emerge from comparing Delegation #1 and Delegation #2, identifying what is genuinely shared, and extracting that into a separate authoring SDK. Triggering condition: the second Delegation is committed to. Risk if too early: bad abstractions baked in and forced on future authors. Risk if too late: third-party Delegation authors hit too much friction to participate in the marketplace, slowing the network-effect curve in section 4.
+- **When does the Delegation Authoring SDK emerge?** Today MeshyCal is hand-built against Mesherra's raw SDK. A reusable scaffolding layer for new Delegations (a `mesherra create-delegation` CLI, a base `Delegation` class, standard project structure, signing and registration helpers) is premature with only one example. It should emerge from comparing Delegation #1 and Delegation #2, identifying what is genuinely shared, and extracting that into a separate authoring SDK. Triggering condition: the second Delegation is committed to. Risk if too early: bad abstractions baked in and forced on future authors. Risk if too late: third-party Delegation authors hit too much friction to participate in the marketplace, slowing the network-effect curve in section 4.
 
 ## 8. Cross-references
 

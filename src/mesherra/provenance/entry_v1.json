@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tesherra.provenance/entry-v1",
-  "title": "Tesherra Provenance Ledger Entry v1",
-  "description": "An append-only, signed entry in a single principal's residue ledger. Each entry records one action this principal took or observed. Authoritative source: tesherra/src/tesherra/models/primitives.py (Residue). This JSON Schema is the runtime-validation and cross-language mirror.",
+  "$id": "mesherra.provenance/entry-v1",
+  "title": "Mesherra Provenance Ledger Entry v1",
+  "description": "An append-only, signed entry in a single principal's residue ledger. Each entry records one action this principal took or observed. Authoritative source: mesherra/src/mesherra/models/primitives.py (Residue). This JSON Schema is the runtime-validation and cross-language mirror.",
   "type": "object",
   "additionalProperties": false,
   "required": [

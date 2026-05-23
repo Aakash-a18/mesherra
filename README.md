@@ -1,4 +1,4 @@
-# Tesherra
+# Mesherra
 
 > Trust layer for agent-to-agent (A2A) interaction. Identity verification, scoped disclosure, and provenance — on top of Google's A2A protocol.
 
@@ -17,7 +17,7 @@ Google's Agent2Agent (A2A) protocol gives AI agents a way to find each other and
 
 A2A is, in its own words, "communication, not security." The gap is explicit and intentional.
 
-**Tesherra fills it.**
+**Mesherra fills it.**
 
 | Piece | What it does |
 |---|---|
@@ -31,13 +31,13 @@ Plus a zeroth piece — **policy capture** — translating user intent into stru
 
 The agentic web is forming now. The companies that own the trust primitives for it will look back on this moment the way Plaid, Stripe, and DocuSign look back on the early commercial web: boring infrastructure that captured enormous value because everything had to route through it.
 
-Tesherra is one of those primitives. It sits between any AI agent and the A2A wire — invisible to end users, essential to anyone whose agent does anything consequential.
+Mesherra is one of those primitives. It sits between any AI agent and the A2A wire — invisible to end users, essential to anyone whose agent does anything consequential.
 
 ## The origin metaphor
 
 In Roman antiquity, two parties making a long-term agreement would break a *tessera* — a small clay or bone tile — into two halves. Each kept one. Centuries later, descendants who had never met could meet, fit the halves together, and prove the original bond by the precision of the fit.
 
-Tesherra is the digital tessera. The trust holds without anyone trusting anyone in advance — the two halves either fit, or they don't.
+Mesherra is the digital tessera. The trust holds without anyone trusting anyone in advance — the two halves either fit, or they don't.
 
 ## What you should read
 
@@ -45,17 +45,17 @@ In order of "where to start":
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full system spec. 14 sections covering core concepts (Agent, Object, Layer, Promotion, Handshake, Policy, Residue), Object data flow, the three pieces, schema-based messaging, threat model, the 11-component inventory.
 - [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) — visual reference. 6 ASCII diagrams: layer stack, two-user mirrored stacks, full negotiation flow, internal architecture, outbound/inbound message paths.
-- [`docs/STRATEGY.md`](docs/STRATEGY.md) — longer-arc strategic direction. The Application → Delegation paradigm shift; three-product framing (Tesherra / Butler / first Delegation); marketplace path through a Delegation Registry; open strategic questions.
+- [`docs/STRATEGY.md`](docs/STRATEGY.md) — longer-arc strategic direction. The Application → Delegation paradigm shift; three-product framing (Mesherra / Butler / first Delegation); marketplace path through a Delegation Registry; open strategic questions.
 - [`demos/phase_1/SPEC.md`](demos/phase_1/SPEC.md) — the Phase 1 demo specification. Pins the proposal schema, residue entry schema, canonicalization commitment (JCS / SHA-256 / Ed25519), and 14 end-state assertions.
 - [`CLAUDE.md`](CLAUDE.md) — orientation for any AI coding session entering this repo. Vocabulary, build discipline, build order.
 
 ## The first Delegation
 
-Tesherra is the substrate. **Delegations** are the agent-era equivalent of applications — published packages that use Tesherra primitives to deliver an end-user experience for a specific domain.
+Mesherra is the substrate. **Delegations** are the agent-era equivalent of applications — published packages that use Mesherra primitives to deliver an end-user experience for a specific domain.
 
 **[MeshyCal](https://github.com/Aakash-a18/meshycal)** is the first Delegation. Two users' AI agents negotiate a meeting time without exposing either calendar, producing a signed attested record.
 
-MeshyCal is our **test rig** — it proves Tesherra works mechanically across all three pieces in the smallest possible negotiation. It is **not our market**. The market for Tesherra is contracts, transactions, regulated B2B coordination — domains where being wrong is expensive and trust is materially valued. Scheduling exercises the layer; high-stakes commerce justifies it.
+MeshyCal is our **test rig** — it proves Mesherra works mechanically across all three pieces in the smallest possible negotiation. It is **not our market**. The market for Mesherra is contracts, transactions, regulated B2B coordination — domains where being wrong is expensive and trust is materially valued. Scheduling exercises the layer; high-stakes commerce justifies it.
 
 ## The Application → Delegation paradigm
 
@@ -75,7 +75,7 @@ The four-component shape is the Delegation integration contract. MeshyCal is the
 ## Project structure
 
 ```
-tesherra/
+mesherra/
 ├── docs/
 │   ├── ARCHITECTURE.md         # System spec (14 sections)
 │   ├── DIAGRAMS.md             # 6 ASCII visual references
@@ -83,7 +83,7 @@ tesherra/
 ├── demos/
 │   └── phase_1/
 │       └── SPEC.md             # Provenance round-trip demo spec
-├── src/tesherra/               # 11 component modules — all NotImplementedError today
+├── src/mesherra/               # 11 component modules — all NotImplementedError today
 │   ├── sdk.py                  # 13.1  Public API surface
 │   ├── gateways/               # 13.2, 13.3  Outbound + inbound airlock
 │   ├── policy/                 # 13.4, 13.6  Engine + signed user policy store
@@ -118,7 +118,7 @@ The build order is enforced by discipline (`CLAUDE.md`): provenance first (recor
 ## Build discipline (the rules we don't break)
 
 1. The trust layer must not import from any consumer (Delegation). Ever.
-2. Domain-specific logic lives in consumer Delegations, not in Tesherra.
+2. Domain-specific logic lives in consumer Delegations, not in Mesherra.
 3. The renderer is disposable; the principal model is the source of truth.
 4. Ride the A2A SDK. Don't reimplement transport, discovery, or task lifecycle.
 5. Hard zone separation; the airlock is the single boundary gate.
@@ -130,8 +130,8 @@ The build order is enforced by discipline (`CLAUDE.md`): provenance first (recor
 ## Setup (once Phase 1 code lands)
 
 ```bash
-git clone https://github.com/Aakash-a18/tesherra.git
-cd tesherra
+git clone https://github.com/Aakash-a18/mesherra.git
+cd mesherra
 cp .env.example .env
 # Edit .env with your local values
 pip install -e ".[dev]"

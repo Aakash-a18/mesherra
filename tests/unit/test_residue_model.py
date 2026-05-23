@@ -24,12 +24,12 @@ import pytest
 from jcs import canonicalize
 from pydantic import ValidationError
 
-from tesherra.models.primitives import ActionType, Operation, Residue
+from mesherra.models.primitives import ActionType, Operation, Residue
 
 SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "src"
-    / "tesherra"
+    / "mesherra"
     / "provenance"
     / "entry_v1.json"
 )
