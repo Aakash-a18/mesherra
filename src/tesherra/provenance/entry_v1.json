@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tesherra.provenance/entry-v1",
+  "title": "Tesherra Provenance Ledger Entry v1",
+  "description": "An append-only, signed entry in a single principal's residue ledger. Each entry records one action this principal took or observed. Authoritative source: tesherra/src/tesherra/models/primitives.py (Residue). This JSON Schema is the runtime-validation and cross-language mirror.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "ledger_owner",
+    "task_id",
+    "context_id",
+    "sequence",
+    "previous_hash",
+    "timestamp",
+    "actor",
+    "counterpart",
+    "action_type",
+    "operation",
+    "payload_hash",
+    "payload_schema",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "description": "Schema version of this entry.",
+      "const": 1
+    },
+    "ledger_owner": {
+      "description": "Principal that owns this ledger shard.",
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "description": "The A2A task.id this entry pertains to.",
+      "type": "string",
+      "minLength": 1
+    },
+    "context_id": {
+      "description": "The A2A context_id tying multi-turn interactions together.",
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence": {
+      "description": "Monotonic per-ledger entry index, starting at 0.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "previous_hash": {
+      "description": "SHA-256 content hash of the previous entry in this ledger (hex). Empty string for sequence=0.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{64}|)$"
+    },
+    "timestamp": {
+      "description": "ISO 8601 UTC timestamp of when this entry was recorded.",
+      "type": "string",
+      "format": "date-time",
+      "minLength": 1
+    },
+    "actor": {
+      "description": "Principal that performed the action. For emit entries this equals ledger_owner; for receive entries it is the remote principal.",
+      "type": "string",
+      "minLength": 1
+    },
+    "counterpart": {
+      "description": "Principal on the other side of the interaction.",
+      "type": "string",
+      "minLength": 1
+    },
+    "action_type": {
+      "description": "Direction of the action from this ledger's perspective.",
+      "type": "string",
+      "enum": ["emit", "receive"]
+    },
+    "operation": {
+      "description": "What kind of action it was.",
+      "type": "string",
+      "enum": ["proposal", "counter", "acceptance", "rejection"]
+    },
+    "payload_hash": {
+      "description": "SHA-256 (hex) of the canonical JSON (JCS) encoding of the payload referenced by this entry.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "payload_schema": {
+      "description": "Schema ID of the payload that was hashed (e.g., meshycal.scheduling/proposal-v1).",
+      "type": "string",
+      "minLength": 1
+    },
+    "signature": {
+      "description": "Ed25519 signature (base64) over the canonical JSON encoding of this entry with the signature field omitted. Verified against actor's public key.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
