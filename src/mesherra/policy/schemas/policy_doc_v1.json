@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesherra.policy/doc-v1",
+  "title": "Mesherra Policy Document v1",
+  "description": "The user's signed constitution. One document per principal. Each document is a list of rules; each rule scopes how a specific payload schema may cross this principal's airlock. Per ARCHITECTURE.md §13.4 / §13.6 and demos/phase_3/SPEC.md §2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["principal_id", "version", "issued_at", "rules"],
+  "properties": {
+    "principal_id": {
+      "description": "The principal this policy belongs to. Must match the principal whose signing key signed the doc.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "Monotonically increasing integer. v1 is the first signed policy for a principal; every update increments.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "issued_at": {
+      "description": "RFC 3339 UTC timestamp the policy was signed.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 0,
+      "items": { "$ref": "#/$defs/Rule" }
+    }
+  },
+  "$defs": {
+    "Rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema"],
+          "properties": {
+            "schema": {
+              "description": "Payload schema URI this rule applies to.",
+              "type": "string",
+              "minLength": 1
+            },
+            "direction": {
+              "description": "If omitted, the rule applies to both directions.",
+              "type": "string",
+              "enum": ["outbound", "inbound", "both"]
+            }
+          }
+        },
+        "outbound_allow": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FieldPath" }
+        },
+        "outbound_block": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FieldPath" }
+        },
+        "inbound_allow": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FieldPath" }
+        },
+        "inbound_block": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FieldPath" }
+        },
+        "max_array_size": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "FieldPath": {
+      "description": "Dotted-path reference to a field. Top-level keys (`candidates`) or nested keys (`constraint_hints.tz`). Array indexing is NOT supported in v1.",
+      "type": "string",
+      "pattern": "^[a-z][a-zA-Z0-9_]*(\\.[a-z][a-zA-Z0-9_]*)*$"
+    }
+  }
+}
