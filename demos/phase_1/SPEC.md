@@ -111,7 +111,7 @@ The SendClaim is the object signed by the sender *before* the message hits the A
   "description": "The signed wire object attesting 'sender really sent this payload, with this semantic operation, in this context at this time.' Signed pre-send by the sender; verifiable by the receiver from wire fields alone.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["payload_hash", "payload_schema", "operation", "sender_principal_id", "context_id", "timestamp"],
+  "required": ["payload_hash", "payload_schema", "operation", "sender_principal_id", "context_id", "timestamp", "nonce"],
   "properties": {
     "payload_hash": {
       "description": "SHA-256 (hex) of the canonical JSON (JCS) encoding of the payload.",
@@ -136,9 +136,14 @@ The SendClaim is the object signed by the sender *before* the message hits the A
       "type": "string"
     },
     "timestamp": {
-      "description": "ISO-8601 UTC timestamp at send time. Phase 1 provides small replay defense; Phase 2+ will layer nonces.",
+      "description": "ISO-8601 UTC timestamp at send time. Anchors the Phase 2 clock-skew window in the inbound gateway.",
       "type": "string",
       "format": "date-time"
+    },
+    "nonce": {
+      "description": "Sender-generated UUID4 (128 bits of entropy). The inbound gateway tracks (sender_principal_id, nonce) pairs in a TTL-pruned seen-set keyed to the clock-skew window and rejects duplicates — the Phase 2 replay defense per ARCHITECTURE.md §11.1. Signed as part of the SendClaim so an in-transit attacker cannot substitute a fresh nonce without invalidating the signature.",
+      "type": "string",
+      "minLength": 1
     }
   }
 }
@@ -360,7 +365,8 @@ A third process (`run_demo.py`) orchestrates: starts A and B, triggers A to init
   3. Build proposal payload conforming to meshycal.scheduling/proposal-v1.
   4. Compute payload_hash = SHA-256(JCS(payload)).
   5. Build SendClaim {payload_hash, payload_schema, operation=proposal,
-     sender_principal_id=user-a@phase1.local, context_id=new UUID, timestamp=now()}.
+     sender_principal_id=user-a@phase1.local, context_id=new UUID, timestamp=now(),
+     nonce=new UUID4}.
   6. Sign SendClaim canonical bytes with A's Ed25519 key → send_claim_signature.
   7. Open A2A Task targeting Agent B (task_id is empty; A2A assigns):
      - context_id: from step 5
@@ -370,6 +376,7 @@ A third process (`run_demo.py`) orchestrates: starts A and B, triggers A to init
          "mesherra.send_claim.payload_schema":       "meshycal.scheduling/proposal-v1"
          "mesherra.send_claim.operation":            "proposal"
          "mesherra.send_claim.timestamp":            <ISO-8601>
+         "mesherra.send_claim.nonce":                <UUID4>
          "mesherra.send_claim.signature":            <base64 Ed25519 sig>
   8. Send via adapter.send_envelope(...). Await response.
 

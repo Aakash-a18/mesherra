@@ -131,6 +131,7 @@ class OutboundGateway:
 
         context_id = context_id or str(uuid.uuid4())
         send_timestamp = _utc_now_iso()
+        nonce = str(uuid.uuid4())
         payload_hash = content_hash(canonical_json(payload))
 
         outbound_envelope = self._build_outbound_envelope(
@@ -140,6 +141,7 @@ class OutboundGateway:
             payload_schema=payload_schema,
             operation=operation,
             timestamp=send_timestamp,
+            nonce=nonce,
         )
 
         response_envelope = await self._adapter.send_envelope(
@@ -213,6 +215,7 @@ class OutboundGateway:
         payload_schema: str,
         operation: Operation,
         timestamp: str,
+        nonce: str,
     ) -> MesherraEnvelope:
         send_claim = SendClaim(
             payload_hash=payload_hash,
@@ -221,6 +224,7 @@ class OutboundGateway:
             sender_principal_id=self._principal_id,
             context_id=context_id,
             timestamp=timestamp,
+            nonce=nonce,
         )
         signature = self._signer.sign(
             canonical_json(send_claim.to_signing_bytes_input())
@@ -233,6 +237,7 @@ class OutboundGateway:
             payload_schema=payload_schema,
             operation=operation,
             timestamp=timestamp,
+            nonce=nonce,
             send_claim_signature=signature,
         )
 
@@ -248,6 +253,7 @@ class OutboundGateway:
             sender_principal_id=peer,
             context_id=response_envelope.context_id,
             timestamp=response_envelope.timestamp,
+            nonce=response_envelope.nonce,
         )
         canonical_bytes = canonical_json(send_claim.to_signing_bytes_input())
         return verifier.verify(canonical_bytes, response_envelope.send_claim_signature)

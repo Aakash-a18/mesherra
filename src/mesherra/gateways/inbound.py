@@ -2,16 +2,25 @@
 
 Implements ARCHITECTURE.md §13.3. The single airlock for incoming messages.
 
-Phase 1 pipeline (subset of the full architecture pipeline):
+Phase 1 pipeline (with Phase 2 hardening per ARCH §11.1):
 
 1. (Phase 2+ Schema check against Schema Registry — Phase 1 trusts the
    caller's schema declaration)
 2. (Phase 2+ Sender resolution via Identity Directory — Phase 1 uses a
    caller-supplied public-key directory)
-3. SendClaim verification.
+3. SendClaim signature verification.
+3a. Clock-skew window check (Phase 2 hardening): reject if
+    ``envelope.timestamp`` is outside ``now ± MESHERRA_CLOCK_SKEW_SECONDS``.
+3b. (sender_principal_id, nonce) replay check (Phase 2 hardening): reject
+    if the same nonce has been observed from the same sender within the
+    seen-set's TTL window.
 4. (Phase 2+ Policy decision — Phase 1 always allows)
 5. Build & sign receive Residue; append to ledger.
 6. Invoke consumer handler; package response.
+
+Order rationale: steps 3a/3b run AFTER signature verification (3) so the
+seen-set is only populated by signature-verified envelopes from known
+senders — an attacker can't fill it with unverified traffic.
 
 No consumer code receives raw envelopes; the gateway is the only path
 between the A2A adapter and the consumer's business logic.
@@ -19,6 +28,7 @@ between the A2A adapter and the consumer's business logic.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -34,6 +44,11 @@ from mesherra.models.primitives import ActionType, Operation, Residue, SendClaim
 from mesherra.provenance.ledger import ProvenanceLedger
 
 from .outbound import GatewayError, PeerSignatureVerificationError, UnknownPrincipalError
+from .replay import (
+    ReplayedNonceError,
+    ReplayProtector,
+    TimestampOutsideWindowError,
+)
 
 # -- Consumer-facing types ----------------------------------------------
 
@@ -87,11 +102,13 @@ class InboundGateway:
         signer: Signer,
         ledger: ProvenanceLedger,
         public_key_directory: dict[str, str],
+        replay_protector: ReplayProtector,
     ) -> None:
         self._principal_id = principal_id
         self._signer = signer
         self._ledger = ledger
         self._public_key_directory = public_key_directory
+        self._replay_protector = replay_protector
         self._consumer: ConsumerHandler | None = None
 
     def register_consumer(self, handler: ConsumerHandler) -> None:
@@ -114,6 +131,8 @@ class InboundGateway:
         Raises:
             UnknownPrincipalError: sender_principal_id not in directory.
             PeerSignatureVerificationError: SendClaim signature did not verify.
+            TimestampOutsideWindowError: envelope.timestamp outside skew window.
+            ReplayedNonceError: (sender, nonce) already observed within window.
             GatewayError: register_consumer was never called.
         """
         if self._consumer is None:
@@ -134,6 +153,13 @@ class InboundGateway:
                 f"Inbound SendClaim from {sender!r} did not verify under "
                 "their published public key."
             )
+
+        # Steps 3a/3b: replay defenses, after signature verification so the
+        # nonce seen-set is only populated by verified envelopes from known
+        # senders. Timestamp check first because it's pure (no state mutation);
+        # nonce check last because it records.
+        self._replay_protector.check_timestamp(envelope.timestamp)
+        self._replay_protector.check_and_record_nonce(sender, envelope.nonce)
 
         # Step 5: write our receive Residue.
         payload_hash = content_hash(canonical_json(envelope.payload))
@@ -189,6 +215,7 @@ class InboundGateway:
             payload_schema=response_schema,
             operation=outgoing.operation,
             timestamp=response_timestamp,
+            nonce=str(uuid.uuid4()),
         )
 
     # -- internals ------------------------------------------------------
@@ -203,6 +230,7 @@ class InboundGateway:
             sender_principal_id=sender,
             context_id=envelope.context_id,
             timestamp=envelope.timestamp,
+            nonce=envelope.nonce,
         )
         canonical_bytes = canonical_json(send_claim.to_signing_bytes_input())
         return verifier.verify(canonical_bytes, envelope.send_claim_signature)
@@ -217,6 +245,7 @@ class InboundGateway:
         payload_schema: str,
         operation: Operation,
         timestamp: str,
+        nonce: str,
     ) -> MesherraEnvelope:
         send_claim = SendClaim(
             payload_hash=payload_hash,
@@ -225,6 +254,7 @@ class InboundGateway:
             sender_principal_id=self._principal_id,
             context_id=context_id,
             timestamp=timestamp,
+            nonce=nonce,
         )
         signature = self._signer.sign(
             canonical_json(send_claim.to_signing_bytes_input())
@@ -237,6 +267,7 @@ class InboundGateway:
             payload_schema=payload_schema,
             operation=operation,
             timestamp=timestamp,
+            nonce=nonce,
             send_claim_signature=signature,
         )
 

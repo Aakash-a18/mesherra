@@ -91,6 +91,7 @@ def _valid_send_claim_fields(draw) -> dict:
         "sender_principal_id": draw(_NON_EMPTY_TEXT),
         "context_id": draw(_NON_EMPTY_TEXT),
         "timestamp": draw(_NON_EMPTY_TEXT),
+        "nonce": draw(_NON_EMPTY_TEXT),
     }
 
 

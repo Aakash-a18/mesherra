@@ -14,7 +14,8 @@ Trust model (per the Phase 1 design decision documented in §13.10):
 * The signed object on the wire is a :class:`SendClaim` (defined in
   ``models/primitives.py``), NOT a full Residue. The SendClaim contains
   only fields available before A2A assigns ``task_id``: payload_hash,
-  payload_schema, operation, sender_principal_id, context_id, timestamp.
+  payload_schema, operation, sender_principal_id, context_id, timestamp,
+  nonce.
 * ``send_claim_signature`` is the sender's Ed25519 signature over the
   canonical JCS bytes of the SendClaim.
 * Residue entries are built and signed POST-response in each ledger, with
@@ -87,8 +88,23 @@ class MesherraEnvelope(BaseModel):
         description=(
             "ISO-8601 UTC timestamp captured at send time. Travels on the "
             "wire so the receiver can reconstruct the canonical SendClaim "
-            "bytes to verify ``send_claim_signature``. Also provides a small "
-            "amount of replay defense; Phase 2+ will layer nonces on top."
+            "bytes to verify ``send_claim_signature``. Combined with the "
+            "``nonce`` field, this anchors the Phase 2 replay defense: the "
+            "inbound gateway rejects timestamps outside a configurable "
+            "clock-skew window and rejects (sender, nonce) duplicates seen "
+            "within that window. See ARCHITECTURE.md §11.1."
+        ),
+    )
+    nonce: str = Field(
+        min_length=1,
+        description=(
+            "Sender-generated random value (UUID4 in Phase 2, 128 bits of "
+            "entropy). Included in the signed SendClaim so an in-transit "
+            "attacker cannot alter it. The inbound gateway maintains a "
+            "TTL-pruned (sender_principal_id, nonce) seen-set keyed to the "
+            "clock-skew window and rejects any envelope whose nonce has "
+            "already been observed from the same sender. This closes the "
+            "Phase 1 replay gap described in ARCHITECTURE.md §11.1."
         ),
     )
     send_claim_signature: str = Field(
@@ -97,8 +113,8 @@ class MesherraEnvelope(BaseModel):
             "Sender's Ed25519 signature (base64) over the canonical JCS "
             "bytes of the SendClaim: "
             "{payload_hash, payload_schema, operation, sender_principal_id, "
-            "context_id, timestamp}. Receiver reconstructs the SendClaim "
-            "from envelope fields (computing payload_hash from envelope.payload) "
-            "and verifies. See ARCHITECTURE.md §13.3 step 3."
+            "context_id, timestamp, nonce}. Receiver reconstructs the "
+            "SendClaim from envelope fields (computing payload_hash from "
+            "envelope.payload) and verifies. See ARCHITECTURE.md §13.3 step 3."
         ),
     )

@@ -466,7 +466,7 @@ Mesherra makes specific security guarantees and explicitly does not make others.
 |---|---|
 | Agent impersonation (someone claims to be User1's agent) | Identity Directory + signed AgentCards verified on every interaction |
 | AgentCard tampering | Signed cards; signature verified through Directory |
-| Replay attacks | Signed SendClaim with timestamp (Phase 1: weak — catches large clock skew only). Phase 2: add nonce + clock-skew tolerance window in the Inbound Gateway; Provenance Ledger gains duplicate-`task.id` rejection. |
+| Replay attacks | Phase 1: weak — signed SendClaim with timestamp catches large clock skew only. **Phase 2 (shipped):** (a) signed `nonce` on every SendClaim, (b) clock-skew tolerance window (`MESHERRA_CLOCK_SKEW_SECONDS`, default 300) + per-sender `(principal_id, nonce)` seen-set in the Inbound Gateway, and (c) Provenance Ledger UNIQUE constraint on `(task_id, action_type, operation)` raising `DuplicateEntry` — storage-layer backstop if the seen-set misses across restarts. Residual risk: the seen-set is in-process, so an attacker holding a captured envelope within the skew window of a process restart can replay once before the ledger constraint catches it. Bounded and acceptable for v0. |
 | Over-disclosure by the sender's own agent | Outbound Gateway scopes against Policy Engine before send |
 | Acceptance from unverified senders | Inbound Gateway requires verified identity before any delivery |
 | Tampering with agreed terms post-hoc | Signed Artifact with provenance hash; both sides hold matching signatures |
@@ -574,7 +574,7 @@ The pipeline splits across the A2A roundtrip — some work happens pre-send, the
 
 1. **Policy decision.** Consult the Policy Engine (§13.4) for `allow / allow_scoped / block / escalate` on the outbound payload. For `allow_scoped`, narrow the payload to permitted fields.
 2. **Peer resolution.** Consult the Identity Directory (§13.5) to resolve the peer principal to a verified URL.
-3. **SendClaim signing.** Compute `payload_hash = SHA-256(JCS(payload))`. Build a `SendClaim` (payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp). Sign the canonical JCS bytes via Crypto Primitives (§13.9). Place the signature in the envelope's `send_claim_signature` field.
+3. **SendClaim signing.** Compute `payload_hash = SHA-256(JCS(payload))`. Build a `SendClaim` (payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp, nonce — see §11.1 for the nonce's replay-defense role). Sign the canonical JCS bytes via Crypto Primitives (§13.9). Place the signature in the envelope's `send_claim_signature` field.
 4. **Hand to A2A SDK Adapter.** Adapter sends; awaits response.
 
 **Post-response (after A2A returns with the assigned `task_id`):**
@@ -600,9 +600,11 @@ When the adapter delivers a `MesherraEnvelope` via the registered `InboundHandle
 
 1. **Schema check.** Resolve `envelope.payload_schema` against the Schema Registry (§13.11). If unknown or `envelope.payload` does not validate, reject. → A2A `InvalidParamsError` response; agent handler is NOT invoked.
 2. **Sender resolution.** Look up `envelope.sender_principal_id` in the Identity Directory (§13.5). If unknown/unverified, reject. → A2A `InvalidAgentResponseError`.
-3. **SendClaim verification.** Construct a `Verifier` from the resolved principal's public key. Reconstruct the canonical `SendClaim` bytes from the envelope: `{payload_hash = SHA-256(JCS(envelope.payload)), payload_schema, operation, sender_principal_id, context_id, timestamp}`. Verify `envelope.send_claim_signature` against those canonical bytes. If verification fails, reject. → A2A authentication error.
+3. **SendClaim verification.** Construct a `Verifier` from the resolved principal's public key. Reconstruct the canonical `SendClaim` bytes from the envelope: `{payload_hash = SHA-256(JCS(envelope.payload)), payload_schema, operation, sender_principal_id, context_id, timestamp, nonce}`. Verify `envelope.send_claim_signature` against those canonical bytes. If verification fails, reject. → A2A authentication error.
+3a. **Clock-skew window check** (Phase 2 hardening per §11.1). Reject if `envelope.timestamp` is outside `now ± MESHERRA_CLOCK_SKEW_SECONDS`. → `TimestampOutsideWindowError`.
+3b. **Nonce replay check** (Phase 2 hardening per §11.1). The gateway maintains a TTL-pruned `(sender_principal_id, nonce)` seen-set with lifetime `2 × clock_skew_seconds` (the longest a replay could still pass the timestamp check). If the pair has already been observed within the window, reject. → `ReplayedNonceError`. Order matters: this check runs AFTER signature verification so the seen-set is only populated by verified envelopes from known senders; an attacker cannot fill it with unverified traffic.
 4. **Policy decision.** Ask the Policy Engine (§13.4) for an `allow / allow_scoped / block / escalate` verdict against the user's signed policy version. Apply the verdict — for `allow_scoped`, narrow the payload to the policy-permitted fields.
-5. **Residue write.** Build a `receive` Residue entry for this exchange (the A2A-assigned `task_id` is now known — it's on `envelope.task_id`). Sign with this user's key. Append to the per-user Provenance Ledger (§13.8). This happens *after* all verification steps so the ledger only contains observations the gateway has accepted as trustworthy.
+5. **Residue write.** Build a `receive` Residue entry for this exchange (the A2A-assigned `task_id` is now known — it's on `envelope.task_id`). Sign with this user's key. Append to the per-user Provenance Ledger (§13.8). This happens *after* all verification steps so the ledger only contains observations the gateway has accepted as trustworthy. The ledger's duplicate-rejecting constraint (§13.8) raises `DuplicateEntry` if the same `(task_id, action_type, operation)` has already been recorded — this only happens if the seen-set in step 3b missed (e.g., across a process restart), and surfacing it as a hard error is the right behavior because a ledger that silently accepts duplicate writes has lost integrity.
 6. **Agent invocation.** Call the registered consumer handler with the verified (and possibly scoped) envelope. The handler's return envelope flows back through the gateway, which:
    - Builds and signs the gateway's `emit` Residue for the response.
    - Wraps the response in a new SendClaim signed by this user.
@@ -681,6 +683,7 @@ Properties:
 - **Tamper-evident**: each entry references the hash of the previous (hash-chain or Merkle-tree)
 - **Per-user shard**: a user can retrieve their full residue without exposing other users'
 - **Indexed**: by A2A `task.id` and `context_id` for fast lookup
+- **Duplicate-rejecting**: refuses a second entry with the same `(task_id, action_type, operation)` — Phase 2 defense-in-depth replay backstop per §11.1 (raises `DuplicateEntry`)
 - **Referenceable**: future tasks can cite prior residue via A2A's `Message.reference_task_ids`, compounding trust across interactions
 
 v0: append-only Postgres table with hash-chain integrity. Future: pluggable for distributed ledger or cryptographic transparency systems.
@@ -716,7 +719,7 @@ These are **core** Mesherra dependencies, not optional. Every concrete deploymen
 
 Mesherra signs at two layers, with two distinct signed objects:
 
-* **SendClaim** — signed *pre-send* by the sender. Lives on the A2A wire. Attests "I really sent this payload, with this semantic operation, in this context at this time." Verifiable by the receiver using only fields available on the wire. Defined in `mesherra.models.primitives.SendClaim`. Schema: `{payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp}`.
+* **SendClaim** — signed *pre-send* by the sender. Lives on the A2A wire. Attests "I really sent this payload, with this semantic operation, in this context at this time, with this single-use nonce." Verifiable by the receiver using only fields available on the wire. Defined in `mesherra.models.primitives.SendClaim`. Schema: `{payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp, nonce}`. The `nonce` field is the Phase 2 replay defense (added per §11.1): a sender-generated UUID4 the inbound gateway tracks in a per-sender seen-set so a captured envelope cannot be re-delivered within the clock-skew window.
 * **Residue** — signed *post-response* by each ledger owner over their own ledger entry. Anchors per-side accountability. Contains ledger-relative fields (`sequence`, `previous_hash`) that the wire cannot carry. Defined in `mesherra.models.primitives.Residue`.
 
 Both signatures are by the same actor on the sender side (A signs both A's SendClaim and A's emit Residue), but the two objects serve different purposes and live in different places. The receiver verifies the SendClaim signature inline at receive time (gateway pipeline step 3); the Residue signature exists purely for post-hoc audit of each ledger.
@@ -736,6 +739,7 @@ class MesherraEnvelope(BaseModel):
     payload_schema: str
     operation: Operation        # PROPOSAL/COUNTER/ACCEPTANCE/REJECTION; signed as part of the SendClaim
     timestamp: str              # ISO-8601 UTC when sender prepared the send
+    nonce: str                  # sender-generated UUID4 for inbound replay defense (§11.1); signed
     send_claim_signature: str   # base64 Ed25519 over canonical(SendClaim)
 ```
 
@@ -753,6 +757,7 @@ This is the boundary shape. The adapter is the single translator between this an
 | `timestamp` | `Message.metadata["mesherra.send_claim.timestamp"]` |
 | `send_claim_signature` | `Message.metadata["mesherra.send_claim.signature"]` |
 | `operation` | `Message.metadata["mesherra.send_claim.operation"]` |
+| `nonce` | `Message.metadata["mesherra.send_claim.nonce"]` |
 | (implicit) | `Message.role = ROLE_AGENT` |
 
 Single sub-namespace under `mesherra.*`:

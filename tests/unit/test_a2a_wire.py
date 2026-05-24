@@ -30,6 +30,7 @@ def _make_envelope(**overrides) -> MesherraEnvelope:
         "payload_schema": "meshycal.scheduling/proposal-v1",
         "operation": Operation.PROPOSAL,
         "timestamp": "2026-05-23T15:30:00Z",
+        "nonce": "11111111-2222-3333-4444-555555555555",
         "send_claim_signature": "base64sig==",
     }
     return MesherraEnvelope(**{**defaults, **overrides})
@@ -53,7 +54,7 @@ class TestEnvelopeToA2A:
         assert first.HasField("data"), "Payload must be in Part.data, not Part.text/raw/url"
         assert first.data.HasField("struct_value")
 
-    def test_metadata_contains_exactly_the_five_namespaced_keys(self) -> None:
+    def test_metadata_contains_exactly_the_six_namespaced_keys(self) -> None:
         msg = envelope_to_a2a_message(_make_envelope(), message_id="m")
         assert msg.HasField("metadata")
         keys = set(msg.metadata.fields.keys())
@@ -62,12 +63,14 @@ class TestEnvelopeToA2A:
             "mesherra.send_claim.payload_schema",
             "mesherra.send_claim.operation",
             "mesherra.send_claim.timestamp",
+            "mesherra.send_claim.nonce",
             "mesherra.send_claim.signature",
         }
 
     def test_metadata_values_match_envelope(self) -> None:
         env = _make_envelope(
             timestamp="2099-01-01T12:34:56Z",
+            nonce="abcdef01-2345-6789-abcd-ef0123456789",
             send_claim_signature="sig123==",
             payload_schema="some/schema-v9",
             sender_principal_id="user-z@example.test",
@@ -76,6 +79,7 @@ class TestEnvelopeToA2A:
         msg = envelope_to_a2a_message(env, message_id="m")
         md = msg.metadata.fields
         assert md["mesherra.send_claim.timestamp"].string_value == "2099-01-01T12:34:56Z"
+        assert md["mesherra.send_claim.nonce"].string_value == "abcdef01-2345-6789-abcd-ef0123456789"
         assert md["mesherra.send_claim.signature"].string_value == "sig123=="
         assert md["mesherra.send_claim.payload_schema"].string_value == "some/schema-v9"
         assert md["mesherra.send_claim.sender_principal_id"].string_value == "user-z@example.test"

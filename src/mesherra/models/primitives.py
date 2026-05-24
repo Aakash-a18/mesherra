@@ -110,9 +110,9 @@ class SendClaim(BaseModel):
 
     * **SendClaim** lives on the wire, is signed pre-send, and contains only
       fields known before the A2A roundtrip (so no task_id, no sequence, no
-      previous_hash, no ledger state). The six fields are:
+      previous_hash, no ledger state). The seven fields are:
       ``payload_hash``, ``payload_schema``, ``operation``,
-      ``sender_principal_id``, ``context_id``, ``timestamp``.
+      ``sender_principal_id``, ``context_id``, ``timestamp``, ``nonce``.
     * **Residue** lives in each ledger, is signed post-roundtrip (once the
       A2A-assigned ``task_id`` is known), and contains the ledger-relative
       fields (sequence, previous_hash, etc.). Each ledger owner signs their
@@ -134,8 +134,13 @@ class SendClaim(BaseModel):
     invariant: the halves either fit on every signed sub-field, or they
     don't fit at all.
 
-    Phase 1's ``timestamp`` provides a small amount of replay defense;
-    Phase 2+ will layer nonces on top.
+    ``nonce`` is a sender-generated random value (Phase 2: UUID4, 128 bits of
+    entropy) included in the signed SendClaim so the receiver can detect
+    replays: even if an attacker captures a valid envelope and resends it
+    inside the clock-skew window, the inbound gateway's per-sender nonce
+    cache rejects the duplicate. Combined with ``timestamp`` (bounded skew
+    window) this closes the Phase 1 replay gap documented in
+    ARCHITECTURE.md §11.1.
 
     Schema ID: ``mesherra.a2a_adapter/send-claim-v1``
     """
@@ -155,6 +160,7 @@ class SendClaim(BaseModel):
     sender_principal_id: str = Field(min_length=1)
     context_id: str = Field(min_length=1)
     timestamp: str = Field(min_length=1)
+    nonce: str = Field(min_length=1)
 
     @field_validator("payload_hash")
     @classmethod

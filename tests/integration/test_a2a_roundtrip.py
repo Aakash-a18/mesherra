@@ -20,6 +20,7 @@ need to pass before the demo can be expected to work.
 from __future__ import annotations
 
 import socket
+import uuid
 from typing import Any
 
 import pytest
@@ -56,6 +57,7 @@ def _build_signed_envelope(
     operation: Operation = Operation.PROPOSAL,
     task_id: str = "",
     payload_schema: str = "meshycal.scheduling/proposal-v1",
+    nonce: str | None = None,
 ) -> MesherraEnvelope:
     """Build a MesherraEnvelope with a real SendClaim signature.
 
@@ -63,6 +65,8 @@ def _build_signed_envelope(
     the fields available pre-send, sign it, and construct the envelope.
     """
     payload_hash = content_hash(canonical_json(payload))
+    if nonce is None:
+        nonce = str(uuid.uuid4())
     send_claim = SendClaim(
         payload_hash=payload_hash,
         payload_schema=payload_schema,
@@ -70,6 +74,7 @@ def _build_signed_envelope(
         sender_principal_id=sender_principal_id,
         context_id=context_id,
         timestamp=timestamp,
+        nonce=nonce,
     )
     signature = signer.sign(canonical_json(send_claim.to_signing_bytes_input()))
     return MesherraEnvelope(
@@ -80,6 +85,7 @@ def _build_signed_envelope(
         payload_schema=payload_schema,
         operation=operation,
         timestamp=timestamp,
+        nonce=nonce,
         send_claim_signature=signature,
     )
 
@@ -99,6 +105,7 @@ def _verify_send_claim(envelope: MesherraEnvelope, public_key_b64: str) -> bool:
         sender_principal_id=envelope.sender_principal_id,
         context_id=envelope.context_id,
         timestamp=envelope.timestamp,
+        nonce=envelope.nonce,
     )
     canonical_bytes = canonical_json(send_claim.to_signing_bytes_input())
     return verifier.verify(canonical_bytes, envelope.send_claim_signature)

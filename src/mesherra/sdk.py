@@ -41,6 +41,7 @@ from mesherra.gateways.inbound import (
     InboundGateway,
 )
 from mesherra.gateways.outbound import OutboundGateway, OutboundResult
+from mesherra.gateways.replay import ReplayProtector
 from mesherra.models.primitives import Operation, Residue
 from mesherra.provenance.ledger import ProvenanceLedger
 
@@ -74,6 +75,7 @@ class Mesherra:
         ledger: ProvenanceLedger,
         adapter: A2AAdapter,
         public_key_directory: dict[str, str],
+        replay_protector: ReplayProtector | None = None,
     ) -> None:
         if ledger.ledger_owner != principal_id:
             raise ValueError(
@@ -86,6 +88,10 @@ class Mesherra:
         self._ledger = ledger
         self._adapter = adapter
         self._public_key_directory = dict(public_key_directory)
+        # Phase 2 replay defense (ARCH §11.1). Consumers may inject a custom
+        # ReplayProtector (typically for tests that need a controllable
+        # clock); production usage falls through to MESHERRA_CLOCK_SKEW_SECONDS.
+        self._replay_protector = replay_protector or ReplayProtector.from_env()
         self._outbound = OutboundGateway(
             principal_id=principal_id,
             signer=signer,
@@ -98,6 +104,7 @@ class Mesherra:
             signer=signer,
             ledger=ledger,
             public_key_directory=self._public_key_directory,
+            replay_protector=self._replay_protector,
         )
         # Wire the inbound gateway into the adapter. No consumer is
         # registered yet; :meth:`on_message` does that.

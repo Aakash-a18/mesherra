@@ -63,6 +63,24 @@ CREATE TABLE IF NOT EXISTS residue_entries (
 
 CREATE INDEX IF NOT EXISTS idx_residue_task ON residue_entries(task_id);
 CREATE INDEX IF NOT EXISTS idx_residue_context ON residue_entries(context_id);
+
+-- Phase 2 hardening per ARCH §11.1: defense-in-depth backstop against
+-- replay. The Inbound Gateway's (sender_principal_id, nonce) seen-set
+-- is the primary defense; this index ensures that even if the seen-set
+-- misses (e.g., process restart within the skew window), the ledger
+-- itself refuses to record the same (task_id, action_type, operation)
+-- tuple twice. Uniqueness is enforced over JSON-extracted columns so the
+-- existing entry_json blob remains the single source of truth.
+-- Portability note (ARCH §13.8 "Future: pluggable for distributed ledger"):
+-- this expression index requires SQLite's JSON1 extension (built in since
+-- 3.38). A Postgres swap will need to translate this to a generated
+-- column or `jsonb_path_query(entry_json, '$.action_type')` expression.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_residue_unique_task_action_op
+    ON residue_entries(
+        task_id,
+        json_extract(entry_json, '$.action_type'),
+        json_extract(entry_json, '$.operation')
+    );
 """
 
 
@@ -97,6 +115,20 @@ class BrokenChain(LedgerError):
     The previous_hash is computed as ``content_hash(canonical_json(prior.to_signing_payload()))``.
     Raised on append when the chain link is invalid, and surfaced by
     ``verify_chain()`` when an on-disk entry's link is invalid.
+    """
+
+
+class DuplicateEntry(LedgerError):
+    """An entry with the same ``(task_id, action_type, operation)`` already exists.
+
+    Raised on append when the ledger already holds a residue entry with the
+    same tuple. This is the Phase 2 defense-in-depth backstop against the
+    replay vector described in ARCHITECTURE.md §11.1: the Inbound Gateway's
+    (sender_principal_id, nonce) seen-set is the primary defense, but if it
+    misses (e.g., process restart inside the clock-skew window), the ledger
+    itself refuses to record the duplicate. The application is expected to
+    treat this as a hard failure — a single ledger should never contain two
+    entries claiming the same task/direction/operation.
     """
 
 
@@ -190,6 +222,9 @@ class ProvenanceLedger:
             LedgerOwnerMismatch: residue.ledger_owner != self.ledger_owner.
             SequenceGap: residue.sequence is not next_sequence.
             BrokenChain: residue.previous_hash does not match head_hash.
+            DuplicateEntry: an entry with the same (task_id, action_type,
+                operation) already exists. Phase 2 defense-in-depth per
+                ARCH §11.1.
         """
         if residue.ledger_owner != self._ledger_owner:
             raise LedgerOwnerMismatch(
@@ -213,18 +248,34 @@ class ProvenanceLedger:
 
         entry_bytes = canonical_json(residue.model_dump(mode="json"))
         entry_text = entry_bytes.decode("utf-8")
-        with self._conn:
-            self._conn.execute(
-                "INSERT INTO residue_entries "
-                "(sequence, task_id, context_id, entry_json) "
-                "VALUES (?, ?, ?, ?)",
-                (
-                    residue.sequence,
-                    residue.task_id,
-                    residue.context_id,
-                    entry_text,
-                ),
-            )
+        try:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO residue_entries "
+                    "(sequence, task_id, context_id, entry_json) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        residue.sequence,
+                        residue.task_id,
+                        residue.context_id,
+                        entry_text,
+                    ),
+                )
+        except sqlite3.IntegrityError as e:
+            # The UNIQUE INDEX on (task_id, action_type, operation) refused
+            # to record a duplicate. SQLite raises IntegrityError for both
+            # PRIMARY KEY collisions (sequence) and UNIQUE INDEX collisions;
+            # the message disambiguates. Sequence collisions are caught
+            # above by the next_sequence check, so anything reaching here
+            # is a (task_id, action_type, operation) duplicate.
+            raise DuplicateEntry(
+                f"A residue entry for task_id={residue.task_id!r}, "
+                f"action_type={residue.action_type.value!r}, "
+                f"operation={residue.operation.value!r} already exists in "
+                "this ledger. This is the Phase 2 ARCH §11.1 defense-in-depth "
+                "replay backstop firing — the Inbound Gateway's nonce cache "
+                "should normally catch this earlier."
+            ) from e
         return _hash_of_signing_payload(residue)
 
     def get_all(self) -> list[Residue]:

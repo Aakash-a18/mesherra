@@ -24,6 +24,7 @@ from mesherra.crypto.primitives import Signer, canonical_json, content_hash
 from mesherra.models.primitives import ActionType, Operation, Residue
 from mesherra.provenance.ledger import (
     BrokenChain,
+    DuplicateEntry,
     LedgerOwnerMismatch,
     ProvenanceLedger,
     SequenceGap,
@@ -244,6 +245,131 @@ class TestAppendValidation:
             ledger.append(residue)
 
 
+# -- Phase 2 hardening: duplicate-entry rejection (ARCH §11.1) ------------
+
+
+class TestDuplicateEntryRejection:
+    """Phase 2 defense-in-depth backstop: the ledger refuses to record a
+    second entry with the same (task_id, action_type, operation) tuple.
+
+    In normal operation the inbound gateway's nonce seen-set catches replays
+    earlier, but if that misses (e.g., process restart inside the clock-skew
+    window), the ledger itself refuses the duplicate.
+    """
+
+    def test_duplicate_task_action_operation_rejected(
+        self, signer_a: Signer
+    ) -> None:
+        ledger = ProvenanceLedger(db_path=":memory:", ledger_owner=OWNER_A)
+        first = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=0,
+            previous_hash="",
+            task_id="task-replay-target",
+            action_type=ActionType.RECEIVE,
+            operation=Operation.PROPOSAL,
+        )
+        prev_hash = ledger.append(first)
+
+        duplicate = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=1,
+            previous_hash=prev_hash,
+            task_id="task-replay-target",
+            action_type=ActionType.RECEIVE,
+            operation=Operation.PROPOSAL,
+            # Different context_id and timestamp, but same tuple.
+            context_id="ctx-replay",
+            timestamp="2026-05-23T15:30:01Z",
+        )
+        with pytest.raises(DuplicateEntry, match="already exists"):
+            ledger.append(duplicate)
+
+    def test_different_action_type_same_task_ok(
+        self, signer_a: Signer
+    ) -> None:
+        """EMIT and RECEIVE entries for the same task_id+operation are
+        intentionally distinct — that's the normal request/response pattern
+        on the originating side."""
+        ledger = ProvenanceLedger(db_path=":memory:", ledger_owner=OWNER_A)
+        emit = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=0,
+            previous_hash="",
+            task_id="task-1",
+            action_type=ActionType.EMIT,
+            operation=Operation.PROPOSAL,
+        )
+        prev = ledger.append(emit)
+
+        receive = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=1,
+            previous_hash=prev,
+            task_id="task-1",
+            action_type=ActionType.RECEIVE,
+            operation=Operation.PROPOSAL,
+        )
+        ledger.append(receive)
+        assert len(ledger) == 2
+
+    def test_different_operation_same_task_ok(self, signer_a: Signer) -> None:
+        """A multi-turn task with PROPOSAL then COUNTER on the same direction
+        is legitimate — only exact (task, direction, op) tuples are duplicate."""
+        ledger = ProvenanceLedger(db_path=":memory:", ledger_owner=OWNER_A)
+        proposal = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=0,
+            previous_hash="",
+            task_id="task-1",
+            action_type=ActionType.EMIT,
+            operation=Operation.PROPOSAL,
+        )
+        prev = ledger.append(proposal)
+        counter = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=1,
+            previous_hash=prev,
+            task_id="task-1",
+            action_type=ActionType.EMIT,
+            operation=Operation.COUNTER,
+        )
+        ledger.append(counter)
+        assert len(ledger) == 2
+
+    def test_different_task_same_action_operation_ok(
+        self, signer_a: Signer
+    ) -> None:
+        ledger = ProvenanceLedger(db_path=":memory:", ledger_owner=OWNER_A)
+        first = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=0,
+            previous_hash="",
+            task_id="task-1",
+            action_type=ActionType.RECEIVE,
+            operation=Operation.PROPOSAL,
+        )
+        prev = ledger.append(first)
+        second = build_signed_residue(
+            signer=signer_a,
+            ledger_owner=OWNER_A,
+            sequence=1,
+            previous_hash=prev,
+            task_id="task-2",
+            action_type=ActionType.RECEIVE,
+            operation=Operation.PROPOSAL,
+        )
+        ledger.append(second)
+        assert len(ledger) == 2
+
+
 # -- Queries -------------------------------------------------------------
 
 
@@ -385,7 +511,17 @@ class TestVerifyChain:
     ) -> None:
         """If a row's stored bytes can't be parsed as JSON, verify_chain
         must return False (not raise). Per verify_chain's contract: an
-        undecodable row is, by definition, an invalid chain link."""
+        undecodable row is, by definition, an invalid chain link.
+
+        Note on the Phase 2 UNIQUE INDEX: the index uses ``json_extract``,
+        so SQLite refuses ``UPDATE ... SET entry_json = 'not valid json'``
+        at the SQL layer (the index would corrupt). To simulate an attacker
+        with raw file access (who bypasses SQLite's checks entirely), we
+        drop the index first then tamper, on the same open ledger instance
+        so the schema-init path doesn't run again. This reflects the actual
+        threat model: SQL-layer constraints don't defend against bytes-on-disk
+        attacks; verify_chain does.
+        """
         db = tmp_path / "ledger.sqlite"
         with ProvenanceLedger(db_path=db, ledger_owner=OWNER_A) as ledger:
             first = build_signed_residue(
@@ -395,12 +531,25 @@ class TestVerifyChain:
                 previous_hash="",
             )
             ledger.append(first)
-        with sqlite3.connect(db) as raw:
-            raw.execute(
+            # Reach into the open connection (no reopen — that would
+            # re-run _init_schema and fail to recreate the dropped index).
+            conn = ledger._conn  # type: ignore[attr-defined]
+            conn.execute(
+                "DROP INDEX IF EXISTS idx_residue_unique_task_action_op"
+            )
+            # Belt-and-suspenders: prove the index is actually gone, so this
+            # test cannot silently pass for the wrong reason if a future
+            # change makes the index resilient to invalid JSON.
+            present = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE name = 'idx_residue_unique_task_action_op'"
+            ).fetchone()
+            assert present is None
+            conn.execute(
                 "UPDATE residue_entries SET entry_json = 'not valid json' "
                 "WHERE sequence=0"
             )
-        with ProvenanceLedger(db_path=db, ledger_owner=OWNER_A) as ledger:
+            conn.commit()
             assert ledger.verify_chain() is False
 
     def test_schema_invalid_row_returns_false_not_raises(

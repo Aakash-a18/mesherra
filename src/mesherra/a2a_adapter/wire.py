@@ -19,6 +19,7 @@ The mapping follows the table in ARCHITECTURE.md §13.10:
     envelope.payload_schema       -> Message.metadata["mesherra.send_claim.payload_schema"]
     envelope.sender_principal_id  -> Message.metadata["mesherra.send_claim.sender_principal_id"]
     envelope.timestamp            -> Message.metadata["mesherra.send_claim.timestamp"]
+    envelope.nonce                -> Message.metadata["mesherra.send_claim.nonce"]
     envelope.send_claim_signature -> Message.metadata["mesherra.send_claim.signature"]
     (implicit)                    -> Message.role = ROLE_AGENT
 
@@ -54,19 +55,24 @@ from .envelope import MesherraEnvelope
 
 # Reserved metadata key namespace. The `mesherra.*` prefix is reserved by
 # Mesherra; consumers MUST NOT use this prefix for their own metadata.
-# All five SendClaim fields share the `mesherra.send_claim.*` prefix so the
-# wire layout mirrors the SendClaim model exactly. This consistency is
-# load-bearing: when a step-5 implementer reads the spec, they shouldn't have
-# to remember which fields live under .send_claim vs .provenance vs .principal.
+# Every SendClaim field shares the `mesherra.send_claim.*` prefix so the wire
+# layout mirrors the SendClaim model exactly. This consistency is load-bearing:
+# when an implementer reads the spec, they shouldn't have to remember which
+# fields live under .send_claim vs .provenance vs .principal.
 # `operation` joined the SendClaim in Phase 1 review (see ARCHITECTURE.md
 # §13.10): a MitM that flipped proposal↔acceptance under the old wire layout
 # could coerce one party into appearing to agree to a proposal they only
 # acknowledged. Signing it closes that gap.
+# `nonce` was added in Phase 2 hardening (ARCH §11.1) so the inbound gateway
+# can reject replays of captured envelopes within the clock-skew window —
+# also signed as part of the SendClaim so an in-transit attacker cannot
+# substitute a fresh nonce without invalidating the signature.
 _KEY_PAYLOAD_SCHEMA = "mesherra.send_claim.payload_schema"
 _KEY_SENDER_PRINCIPAL_ID = "mesherra.send_claim.sender_principal_id"
 _KEY_TIMESTAMP = "mesherra.send_claim.timestamp"
 _KEY_SIGNATURE = "mesherra.send_claim.signature"
 _KEY_OPERATION = "mesherra.send_claim.operation"
+_KEY_NONCE = "mesherra.send_claim.nonce"
 
 _REQUIRED_METADATA_KEYS = frozenset(
     {
@@ -75,6 +81,7 @@ _REQUIRED_METADATA_KEYS = frozenset(
         _KEY_TIMESTAMP,
         _KEY_SIGNATURE,
         _KEY_OPERATION,
+        _KEY_NONCE,
     }
 )
 
@@ -107,6 +114,7 @@ def envelope_to_a2a_message(
         send_claim_timestamp=envelope.timestamp,
         send_claim_signature=envelope.send_claim_signature,
         operation=envelope.operation.value,
+        nonce=envelope.nonce,
     )
     return Message(
         message_id=message_id,
@@ -155,6 +163,7 @@ def a2a_message_to_envelope(message: Message) -> MesherraEnvelope:
         payload_schema=metadata[_KEY_PAYLOAD_SCHEMA],
         operation=Operation(metadata[_KEY_OPERATION]),
         timestamp=metadata[_KEY_TIMESTAMP],
+        nonce=metadata[_KEY_NONCE],
         send_claim_signature=metadata[_KEY_SIGNATURE],
     )
 
@@ -169,6 +178,7 @@ def _build_metadata(
     send_claim_timestamp: str,
     send_claim_signature: str,
     operation: str,
+    nonce: str,
 ) -> struct_pb2.Struct:
     md = struct_pb2.Struct()
     ParseDict(
@@ -178,6 +188,7 @@ def _build_metadata(
             _KEY_TIMESTAMP: send_claim_timestamp,
             _KEY_SIGNATURE: send_claim_signature,
             _KEY_OPERATION: operation,
+            _KEY_NONCE: nonce,
         },
         md,
     )

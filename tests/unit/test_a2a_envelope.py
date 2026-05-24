@@ -20,6 +20,7 @@ VALID_FIELDS = {
     "payload_schema": "meshycal.scheduling/proposal-v1",
     "operation": Operation.PROPOSAL,
     "timestamp": "2026-05-23T15:30:00Z",
+    "nonce": "11111111-2222-3333-4444-555555555555",
     "send_claim_signature": "base64signature==",
 }
 
@@ -68,6 +69,7 @@ class TestValidation:
             "sender_principal_id",
             "payload_schema",
             "timestamp",
+            "nonce",
             "send_claim_signature",
         ],
     )
