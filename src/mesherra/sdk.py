@@ -17,10 +17,16 @@ Phase 1 surface (the provenance vertical slice):
 * :meth:`Mesherra.attest` — produce a signed attestation bundle for a
   completed task.
 
-Phase 2/3 surface stays NotImplementedError:
+Phase 2 / 3 deferred SDK helpers (still ``NotImplementedError``):
 
-* :meth:`register_principal` — Identity Directory ships in Phase 2.
-* :meth:`verify` — AgentCard verification ships in Phase 2.
+* :meth:`register_principal` — Identity Directory **shipped in Phase 2**
+  but registration is currently done by the orchestrator via direct HTTP
+  to ``POST /principals``. An SDK wrapper is deferred until a real
+  consumer needs it.
+* :meth:`verify` — AgentCard signature verification helper. Phase 2's
+  Directory + ``HTTPDirectoryClient`` already do this on every resolve;
+  this SDK-level helper would expose it as an explicit API for advanced
+  consumers. Deferred.
 * :meth:`get_policy` / :meth:`update_policy` — Policy Engine ships in Phase 3.
 
 Construct with explicit dependencies — Phase 1 is dependency-injection-first
@@ -42,6 +48,7 @@ from mesherra.gateways.inbound import (
 )
 from mesherra.gateways.outbound import OutboundGateway, OutboundResult
 from mesherra.gateways.replay import ReplayProtector
+from mesherra.identity import DirectoryClient
 from mesherra.models.primitives import Operation, Residue
 from mesherra.provenance.ledger import ProvenanceLedger
 
@@ -74,7 +81,7 @@ class Mesherra:
         signer: Signer,
         ledger: ProvenanceLedger,
         adapter: A2AAdapter,
-        public_key_directory: dict[str, str],
+        directory: DirectoryClient,
         replay_protector: ReplayProtector | None = None,
     ) -> None:
         if ledger.ledger_owner != principal_id:
@@ -87,7 +94,11 @@ class Mesherra:
         self._signer = signer
         self._ledger = ledger
         self._adapter = adapter
-        self._public_key_directory = dict(public_key_directory)
+        # Phase 2 Identity Directory (ARCH §13.5). Consumers inject either a
+        # StaticDirectoryClient (tests, demo) or an HTTPDirectoryClient
+        # (production, ships in sub-step 2). The gateways resolve every peer
+        # through this client — no other path from gateway to public key.
+        self._directory = directory
         # Phase 2 replay defense (ARCH §11.1). Consumers may inject a custom
         # ReplayProtector (typically for tests that need a controllable
         # clock); production usage falls through to MESHERRA_CLOCK_SKEW_SECONDS.
@@ -97,13 +108,13 @@ class Mesherra:
             signer=signer,
             ledger=ledger,
             adapter=adapter,
-            public_key_directory=self._public_key_directory,
+            directory=self._directory,
         )
         self._inbound = InboundGateway(
             principal_id=principal_id,
             signer=signer,
             ledger=ledger,
-            public_key_directory=self._public_key_directory,
+            directory=self._directory,
             replay_protector=self._replay_protector,
         )
         # Wire the inbound gateway into the adapter. No consumer is
@@ -213,12 +224,16 @@ class Mesherra:
 
     def register_principal(self) -> None:
         raise NotImplementedError(
-            "register_principal is implemented in Phase 2 (Identity Directory)."
+            "register_principal as an SDK helper is deferred. Phase 2's "
+            "Identity Directory is shipped — register by POSTing to the "
+            "directory's /principals endpoint directly. See mesherra.identity."
         )
 
     def verify(self, agent_card: Any) -> Any:
         raise NotImplementedError(
-            "verify is implemented in Phase 2 (AgentCard verification)."
+            "An explicit SDK-level verify(AgentCard) is deferred. Phase 2's "
+            "HTTPDirectoryClient verifies the directory's signature on every "
+            "resolve; consumers do not need to verify cards by hand."
         )
 
     def get_policy(self) -> Any:

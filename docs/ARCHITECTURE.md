@@ -232,11 +232,13 @@ A2A's AgentCard at `/.well-known/agent-card.json` declares identity and supporte
 
 Mesherra provides a **verified directory**: when an agent encounters a remote AgentCard, Mesherra can answer "yes, this URL belongs to the principal named X, here is the cryptographic proof."
 
+**Phase 2 (shipped):** SQLite-backed HTTP directory service plus a `DirectoryClient` consumer interface (`StaticDirectoryClient` for tests, `HTTPDirectoryClient` for production). Every record returned by the directory is signed by the directory's Ed25519 root key over the canonical JSON of `{principal_id, public_key_b64, issued_at, expires_at}`. Clients pin the directory's public key out-of-band and verify on every resolve. The Outbound and Inbound Gateways consume the `DirectoryClient` interface; no other path from gateway to public key exists. See §13.5 for the full surface.
+
 **Implementation strategy:**
 
 - **Initial centralized trust root.** Mesherra hosts the directory. Similar to Plaid's initial approach to bank trust.
-- **Decentralized-ready data structures.** Schemas designed so a migration to PKI, web-of-trust, or other decentralized models later is not a rewrite.
-- **Wraps incoming AgentCard reads.** Every time an agent reads a remote card, Mesherra inserts a directory lookup + signature check.
+- **Decentralized-ready data structures.** The `DirectoryClient` Protocol is the migration seam — a federated or web-of-trust implementation drops in without touching the gateways or the SDK.
+- **Wraps incoming AgentCard reads.** Every time a gateway resolves a peer, the client does a directory lookup + signature check before returning.
 
 ### 4.2 Scoped disclosure
 
@@ -644,15 +646,30 @@ Policy-version-aware: the engine must validate against the version of policy the
 
 The verified registry of principals.
 
-Operations:
+**Phase 2 (shipped):** HTTP service backed by SQLite, fronted by a `DirectoryClient` consumer interface in `mesherra.identity`. The Outbound and Inbound Gateways resolve every peer through that client; the raw `dict[str, str]` of Phase 1 is gone.
 
-- `resolve(name | URL)` → AgentCard + verification proof
-- `register(principal, AgentCard)` → signed registration record
-- `attest(principal_a, principal_b)` → "these two are verified peers" assertion
+Server endpoints (`mesherra.identity.server.create_app`):
 
-v0: centralized, Mesherra-hosted. Trust root is our organizational signing key.
+- `GET /healthz` → liveness probe.
+- `GET /.well-known/directory-public-key` → the directory's Ed25519 public key (base64). Operators publish this so clients can pin it out-of-band.
+- `POST /principals` → register a principal. Once-only per principal id (re-register raises 409). **No write auth in v0 — must run behind a network policy or reverse proxy that gates POST traffic to trusted operators.**
+- `GET /principals/{id}` → resolve a principal. Returns a record signed by the directory's root key over the canonical JSON of `{principal_id, public_key_b64, issued_at, expires_at}`. Each resolve mints a fresh signature with a fresh validity window (sign-on-read, not sign-once-at-register).
 
-Future: pluggable backend designed to swap to decentralized (PKI, web-of-trust, transparency log) without rewriting consumers.
+Consumer-side client interface (`mesherra.identity.client`):
+
+- `DirectoryClient` Protocol with `async resolve(principal_id) → ResolvedPrincipal`.
+- `StaticDirectoryClient` — in-memory dict-backed, for tests and unit scenarios.
+- `HTTPDirectoryClient` — talks to a running directory; verifies every record against an operator-pinned public key before returning it. Raises `DirectorySignatureVerificationFailed` on mismatch, `UnknownPrincipalError` on 404, `DirectoryUnavailableError` on network failure.
+
+**Deferred to a later phase:**
+
+- `attest(principal_a, principal_b)` → "these two are verified peers" assertion.
+- Write authentication on `POST /principals`.
+- Signed key-rotation flow (v0 has no rotate API; operator delete + re-add).
+
+v0: centralized, Mesherra-hosted. Trust root is the directory's organizational signing key (pinned out-of-band by every client).
+
+Future: pluggable backend designed to swap to decentralized (PKI, web-of-trust, transparency log) without rewriting consumers — the `DirectoryClient` Protocol is the migration seam.
 
 ### 13.6 Policy Store
 
@@ -669,7 +686,9 @@ Properties:
 
 Backing storage for the Identity Directory.
 
-v0: relational database (Postgres or equivalent), Mesherra-hosted. Each row is a principal record with signed AgentCard hash, public key, and claim metadata.
+**Phase 2 (shipped):** SQLite-backed, `mesherra.identity.store.DirectoryStore`. One row per principal: `principal_id` (PK), `public_key_b64`, `registered_at`. Mirrors the lifecycle conventions of `ProvenanceLedger` (§13.8): context-manager wrapped, schema-versioned, fail-fast on mismatch. The store enforces register-once: a second registration for the same principal raises `PrincipalAlreadyRegistered`. Phase 3+ will add a signed key-rotation flow that chains a new row to the previous.
+
+v0: SQLite (recommended for local + small deployments). Future: pluggable backend for Postgres or decentralized models.
 
 Future: pluggable backend for decentralized models.
 

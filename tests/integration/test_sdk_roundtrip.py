@@ -30,10 +30,8 @@ import pytest
 from mesherra.a2a_adapter import A2AAdapter
 from mesherra.crypto.primitives import Signer
 from mesherra.gateways.inbound import IncomingMessage, OutgoingResponse
-from mesherra.gateways.outbound import (
-    PeerSignatureVerificationError,
-    UnknownPrincipalError,
-)
+from mesherra.gateways.outbound import PeerSignatureVerificationError
+from mesherra.identity import StaticDirectoryClient, UnknownPrincipalError
 from mesherra.models.primitives import ActionType, Operation
 from mesherra.provenance.ledger import ProvenanceLedger
 from mesherra.sdk import Mesherra
@@ -78,7 +76,7 @@ def _make_mesherra(
         signer=signer,
         ledger=ledger,
         adapter=adapter,
-        public_key_directory=public_key_directory,
+        directory=StaticDirectoryClient(public_key_directory),
     )
     return sdk, ledger
 

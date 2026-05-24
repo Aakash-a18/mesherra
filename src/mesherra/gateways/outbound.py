@@ -34,6 +34,7 @@ from mesherra.crypto.primitives import (
     canonical_json,
     content_hash,
 )
+from mesherra.identity import DirectoryClient, UnknownPrincipalError
 from mesherra.models.primitives import ActionType, Operation, Residue, SendClaim
 from mesherra.provenance.ledger import ProvenanceLedger
 
@@ -51,14 +52,6 @@ class PeerSignatureVerificationError(GatewayError):
     different bytes than they sent, or there was tampering in transit.
     The gateway raises rather than silently appending an unverified
     response residue.
-    """
-
-
-class UnknownPrincipalError(GatewayError):
-    """The peer's principal id is not in the public-key directory.
-
-    Phase 1: directory is caller-supplied (a dict). Phase 2: Identity
-    Directory does the lookup with mTLS-verified AgentCards.
     """
 
 
@@ -94,13 +87,13 @@ class OutboundGateway:
         signer: Signer,
         ledger: ProvenanceLedger,
         adapter: A2AAdapter,
-        public_key_directory: dict[str, str],
+        directory: DirectoryClient,
     ) -> None:
         self._principal_id = principal_id
         self._signer = signer
         self._ledger = ledger
         self._adapter = adapter
-        self._public_key_directory = public_key_directory
+        self._directory = directory
 
     async def send(
         self,
@@ -123,11 +116,11 @@ class OutboundGateway:
             PeerSignatureVerificationError: peer's response did not verify.
             NotImplementedError: peer returned no response (fire-and-forget).
         """
-        if peer_principal_id not in self._public_key_directory:
-            raise UnknownPrincipalError(
-                f"Peer principal {peer_principal_id!r} not in public-key "
-                f"directory; known: {sorted(self._public_key_directory)}"
-            )
+        # Resolve the peer through the Directory up-front so an unknown
+        # principal fails fast before we do any work. The resolved record
+        # is used again post-response to verify the peer's SendClaim
+        # (kept in a local rather than re-fetched to avoid double I/O).
+        peer = await self._directory.resolve(peer_principal_id)
 
         context_id = context_id or str(uuid.uuid4())
         send_timestamp = _utc_now_iso()
@@ -154,7 +147,9 @@ class OutboundGateway:
                 "always request-response."
             )
 
-        if not self._verify_peer_send_claim(response_envelope):
+        if not self._verify_peer_send_claim(
+            response_envelope, peer_public_key_b64=peer.public_key_b64
+        ):
             raise PeerSignatureVerificationError(
                 f"Response SendClaim from {response_envelope.sender_principal_id!r} "
                 "did not verify under their published public key."
@@ -241,16 +236,27 @@ class OutboundGateway:
             send_claim_signature=signature,
         )
 
-    def _verify_peer_send_claim(self, response_envelope: MesherraEnvelope) -> bool:
-        peer = response_envelope.sender_principal_id
-        if peer not in self._public_key_directory:
-            return False
-        verifier = Verifier.from_b64(self._public_key_directory[peer])
+    def _verify_peer_send_claim(
+        self,
+        response_envelope: MesherraEnvelope,
+        *,
+        peer_public_key_b64: str,
+    ) -> bool:
+        """Verify the peer's response SendClaim against the pre-resolved key.
+
+        The caller (``send``) has already resolved the peer via the Directory,
+        so this method takes the resolved public key as an argument rather
+        than doing its own lookup. Keeps the verifier pure (no I/O) and
+        avoids redundant directory traffic when the real HTTPDirectoryClient
+        lands.
+        """
+        peer_principal_id = response_envelope.sender_principal_id
+        verifier = Verifier.from_b64(peer_public_key_b64)
         send_claim = SendClaim(
             payload_hash=content_hash(canonical_json(response_envelope.payload)),
             payload_schema=response_envelope.payload_schema,
             operation=response_envelope.operation,
-            sender_principal_id=peer,
+            sender_principal_id=peer_principal_id,
             context_id=response_envelope.context_id,
             timestamp=response_envelope.timestamp,
             nonce=response_envelope.nonce,

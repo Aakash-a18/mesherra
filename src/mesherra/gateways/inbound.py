@@ -40,10 +40,11 @@ from mesherra.crypto.primitives import (
     canonical_json,
     content_hash,
 )
+from mesherra.identity import DirectoryClient, UnknownPrincipalError
 from mesherra.models.primitives import ActionType, Operation, Residue, SendClaim
 from mesherra.provenance.ledger import ProvenanceLedger
 
-from .outbound import GatewayError, PeerSignatureVerificationError, UnknownPrincipalError
+from .outbound import GatewayError, PeerSignatureVerificationError
 from .replay import (
     ReplayedNonceError,
     ReplayProtector,
@@ -101,13 +102,13 @@ class InboundGateway:
         principal_id: str,
         signer: Signer,
         ledger: ProvenanceLedger,
-        public_key_directory: dict[str, str],
+        directory: DirectoryClient,
         replay_protector: ReplayProtector,
     ) -> None:
         self._principal_id = principal_id
         self._signer = signer
         self._ledger = ledger
-        self._public_key_directory = public_key_directory
+        self._directory = directory
         self._replay_protector = replay_protector
         self._consumer: ConsumerHandler | None = None
 
@@ -141,14 +142,15 @@ class InboundGateway:
             )
 
         sender = envelope.sender_principal_id
-        if sender not in self._public_key_directory:
-            raise UnknownPrincipalError(
-                f"Sender principal {sender!r} not in public-key directory; "
-                f"known: {sorted(self._public_key_directory)}"
-            )
+        # Resolve via the Directory. An unknown sender raises
+        # UnknownPrincipalError; the resolved record's public key is the
+        # key the SendClaim signature is verified against.
+        sender_record = await self._directory.resolve(sender)
 
         # Step 3: SendClaim verification.
-        if not self._verify_inbound_send_claim(envelope):
+        if not self._verify_inbound_send_claim(
+            envelope, sender_public_key_b64=sender_record.public_key_b64
+        ):
             raise PeerSignatureVerificationError(
                 f"Inbound SendClaim from {sender!r} did not verify under "
                 "their published public key."
@@ -220,9 +222,20 @@ class InboundGateway:
 
     # -- internals ------------------------------------------------------
 
-    def _verify_inbound_send_claim(self, envelope: MesherraEnvelope) -> bool:
+    def _verify_inbound_send_claim(
+        self,
+        envelope: MesherraEnvelope,
+        *,
+        sender_public_key_b64: str,
+    ) -> bool:
+        """Verify the inbound SendClaim against the pre-resolved sender key.
+
+        Sync helper — the directory resolution happened in handle_inbound
+        before this is called. Keeps the verifier pure and avoids any I/O
+        in the signature-bytes-reconstruction path.
+        """
         sender = envelope.sender_principal_id
-        verifier = Verifier.from_b64(self._public_key_directory[sender])
+        verifier = Verifier.from_b64(sender_public_key_b64)
         send_claim = SendClaim(
             payload_hash=content_hash(canonical_json(envelope.payload)),
             payload_schema=envelope.payload_schema,

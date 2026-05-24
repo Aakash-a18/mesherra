@@ -32,6 +32,7 @@ from mesherra.gateways.replay import (
     ReplayProtector,
     TimestampOutsideWindowError,
 )
+from mesherra.identity import StaticDirectoryClient
 from mesherra.models.primitives import Operation, SendClaim
 from mesherra.provenance.ledger import ProvenanceLedger
 
@@ -107,7 +108,7 @@ def _build_b_gateway(
         principal_id=OWNER_B,
         signer=signer,
         ledger=ledger,
-        public_key_directory=public_key_directory,
+        directory=StaticDirectoryClient(public_key_directory),
         replay_protector=replay_protector,
     )
 

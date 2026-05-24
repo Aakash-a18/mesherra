@@ -526,4 +526,22 @@ Phase 1 is complete when:
 - The ledgers persist after the demo terminates and can be re-verified cold
 - `pytest tests/integration/test_provenance_roundtrip.py` passes
 
-Anything beyond that is Phase 2.
+### Phase 2 done-condition (additive)
+
+Phase 2 is complete when all Phase 1 conditions still hold AND:
+
+- **2a — replay-defense hardening** (ARCH §11.1): every SendClaim on the
+  wire carries a signed `nonce`; the inbound gateway enforces a
+  configurable clock-skew window (`MESHERRA_CLOCK_SKEW_SECONDS`) and a
+  per-sender nonce seen-set; the provenance ledger has a UNIQUE
+  constraint on `(task_id, action_type, operation)` raising
+  `DuplicateEntry` as the storage-layer backstop.
+- **2b — identity verification** (ARCH §4.1, §13.5, §13.7): the
+  hardcoded `public_key_directory: dict[str, str]` is replaced with a
+  live HTTP `DirectoryClient`. The MeshyCal orchestrator boots a signed
+  Directory service, registers both principals, and constructs both
+  agents with `HTTPDirectoryClient` instances pinning the Directory's
+  published public key. All 14 SPEC §5 assertions still PASS with the
+  live signed Directory in the loop.
+
+Anything beyond that is Phase 3.
