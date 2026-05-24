@@ -1,0 +1,34 @@
+# Dependabot config — weekly check for Python and GitHub Actions updates.
+#
+# Notes:
+# * `package-ecosystem: "uv"` resolves dependencies from pyproject.toml AND
+#   updates uv.lock atomically. If Dependabot ever drops `uv` support, swap
+#   to `"pip"` (which reads pyproject.toml) and regenerate uv.lock locally
+#   after merging.
+# * `package-ecosystem: "github-actions"` keeps the test.yml workflow's
+#   pinned actions (actions/checkout, astral-sh/setup-uv) up to date.
+
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci(deps)"
