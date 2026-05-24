@@ -631,16 +631,18 @@ No consumer code receives raw A2A messages. Everything inbound passes through th
 
 ### 13.4 Policy Engine
 
-Stateless decision-maker. Given `(request, current_policy, context)`, returns a verdict.
+Stateless decision-maker. Given `(payload, payload_schema, direction, policy)`, returns a `PolicyDecision` carrying a verdict plus, for `ALLOW_SCOPED`, the post-scoping payload that should actually cross the airlock.
 
 Verdicts:
 
-- `allow` — pass the full payload
-- `allow_scoped` — pass a subset of the payload (engine specifies what)
-- `block` — refuse the interaction
-- `escalate` — surface to the user via A2A's `INPUT_REQUIRED` task state
+- `ALLOW` — pass the full payload
+- `ALLOW_SCOPED` — pass the engine-specified scoped subset
+- `BLOCK` — refuse the interaction (default-deny on unmatched schema, empty allow-list, or all fields removed)
+- `ESCALATE` — reserved for future conditional rules; never produced in v1, but the gateways still handle it defensively (treating it as `BLOCK`) so a future engine returning it fails closed
 
-Policy-version-aware: the engine must validate against the version of policy the user signed. Mismatches force re-signing rather than silent acceptance.
+**Phase 3 (shipped):** `mesherra.policy.PolicyEngine`. Stateless, no I/O, no clock — every dependency comes in via `evaluate()`. Rule semantics per `demos/phase_3/SPEC.md` §2.2: match on `(schema, direction)`; default-deny on no match; outbound/inbound allow-lists narrow what crosses; outbound/inbound block-lists drop named paths; `max_array_size` truncates arrays. Verdict is computed by JCS-canonical equality between input and post-rule payload.
+
+Policy-version-aware: the engine validates against the version of policy the user signed (the doc's `version` field). The `PolicyStore` (§13.6) hands the latest signed version to the gateways on each evaluation; mismatches force re-signing rather than silent acceptance.
 
 ### 13.5 Identity Directory
 
@@ -681,6 +683,8 @@ Properties:
 - **Versioned**: every change is a new signed version with a monotonically increasing version number
 - **Local-first**: stored on the user's device, replicated to Mesherra-hosted backup with end-to-end encryption
 - **Schema-validated**: every version must match the policy schema for the Mesherra version it was signed against
+
+**Phase 3 (shipped):** SQLite-backed `mesherra.policy.PolicyStore`. Per-principal: one store serves one principal's policies, bound at construction to that principal's `(principal_id, public_key_b64)`. Every read verifies the stored signature against the bound key — `PolicyVerificationFailed` on mismatch, treat as tampering. Versions are append-only and strictly monotonic; non-monotonic insert raises `NonMonotonicPolicyVersion`. Cross-principal save attempts raise `PolicyPrincipalMismatch`. Schema-versioned via a `policy_meta` row with fail-fast on mismatch (mirrors `DirectoryStore.directory_meta`). End-to-end-encrypted backup replication ships later.
 
 ### 13.7 Directory Store
 

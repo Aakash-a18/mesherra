@@ -52,10 +52,10 @@ See `docs/ARCHITECTURE.md` for the full design.
 
 Layers ship in order of difficulty, easiest first:
 
-1. **Provenance** — record and sign. Least invasive. Demonstrates the layer is real.
-2. **Identity verification** — mostly integration of mTLS / signed AgentCards. Off-the-shelf primitives.
-3. **Scoped disclosure** — hardest. Sits in the message path. Most differentiated. Ships once 1 and 2 are stable.
-4. **Policy capture (zeroth piece)** — develops alongside all three; the schema firms up as the others reveal what they need.
+1. **Provenance** ✅ shipped (Phase 1). Record and sign. Least invasive. Demonstrates the layer is real.
+2. **Identity verification** ✅ shipped (Phase 2: replay-defense hardening + live signed Directory). Integration of Ed25519-signed records via a per-agent `HTTPDirectoryClient` over a small FastAPI Directory service.
+3. **Scoped disclosure** ✅ shipped (Phase 3). User-signed policy doc in a per-principal SQLite `PolicyStore`; stateless `PolicyEngine` returns ALLOW / ALLOW_SCOPED / BLOCK; gateways enforce on every outbound and inbound message. MeshyCal demo proves blocked fields never cross the wire.
+4. **Policy capture (zeroth piece)** — develops alongside all three; the schema firms up as the others reveal what they need. Phase 3 ships the doc schema (`mesherra.policy/doc-v1`); the user-facing capture UI lives in consumers (MeshyCal Phase 4+).
 
 ## First consumer
 

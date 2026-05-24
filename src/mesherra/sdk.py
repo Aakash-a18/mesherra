@@ -17,7 +17,14 @@ Phase 1 surface (the provenance vertical slice):
 * :meth:`Mesherra.attest` — produce a signed attestation bundle for a
   completed task.
 
-Phase 2 / 3 deferred SDK helpers (still ``NotImplementedError``):
+Phase 3 (shipped):
+
+* :meth:`get_policy` / :meth:`update_policy` — round-trip the user's
+  signed policy through the per-principal :class:`PolicyStore`. Bypass
+  mode (no store injected at construction) raises ``RuntimeError`` on
+  either call to surface the misconfiguration explicitly.
+
+Phase 2/3 deferred SDK helpers (still ``NotImplementedError``):
 
 * :meth:`register_principal` — Identity Directory **shipped in Phase 2**
   but registration is currently done by the orchestrator via direct HTTP
@@ -27,7 +34,6 @@ Phase 2 / 3 deferred SDK helpers (still ``NotImplementedError``):
   Directory + ``HTTPDirectoryClient`` already do this on every resolve;
   this SDK-level helper would expose it as an explicit API for advanced
   consumers. Deferred.
-* :meth:`get_policy` / :meth:`update_policy` — Policy Engine ships in Phase 3.
 
 Construct with explicit dependencies — Phase 1 is dependency-injection-first
 so tests and the demo orchestrator can wire fake/synthetic components.
