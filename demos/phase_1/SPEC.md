@@ -95,6 +95,57 @@ If any of the above creeps in during Phase 1 work, stop and reconsider.
 
 A counter-proposal uses the same schema. An acceptance is a proposal with `candidates.length == 1` (the chosen slot). This collapses three message types into one for Phase 1; Phase 2+ will likely split them.
 
+## 2a. The SendClaim Schema (signed on the wire)
+
+**Schema ID:** `mesherra.a2a_adapter/send-claim-v1`
+**Owner:** Mesherra (the trust layer)
+**Phase 1 location:** Pydantic model in `mesherra/src/mesherra/models/primitives.py` (`SendClaim` class).
+
+The SendClaim is the object signed by the sender *before* the message hits the A2A wire. It is verifiable by the receiver using only fields that travel on the wire — no dependency on either party's ledger state.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesherra.a2a_adapter/send-claim-v1",
+  "title": "Mesherra A2A SendClaim v1",
+  "description": "The signed wire object attesting 'sender really sent this payload, with this semantic operation, in this context at this time.' Signed pre-send by the sender; verifiable by the receiver from wire fields alone.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload_hash", "payload_schema", "operation", "sender_principal_id", "context_id", "timestamp"],
+  "properties": {
+    "payload_hash": {
+      "description": "SHA-256 (hex) of the canonical JSON (JCS) encoding of the payload.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "payload_schema": {
+      "description": "Schema ID of the payload.",
+      "type": "string"
+    },
+    "operation": {
+      "description": "Semantic action this send represents. Signed because the receiver branches on it: an unsigned operation would let a MitM flip proposal↔acceptance and coerce one party into appearing to agree to a proposal they only acknowledged.",
+      "type": "string",
+      "enum": ["proposal", "counter", "acceptance", "rejection"]
+    },
+    "sender_principal_id": {
+      "description": "Principal performing the send.",
+      "type": "string"
+    },
+    "context_id": {
+      "description": "Multi-turn correlation ID set by the sender.",
+      "type": "string"
+    },
+    "timestamp": {
+      "description": "ISO-8601 UTC timestamp at send time. Phase 1 provides small replay defense; Phase 2+ will layer nonces.",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
+```
+
+**Why SendClaim is distinct from Residue:** A2A 1.0 assigns `task_id` only after the server-side roundtrip. The Residue (§3) contains `task_id` and `sequence` as signed fields, so it cannot be constructed before sending. The SendClaim is the largest signable object that contains no `task_id` dependency — making it the natural wire-level signed object. The Residue is the ledger-level signed object, built and signed *post-response* with the assigned `task_id`. Both are signed by the same actor (the sender, for outbound) but over different objects with different purposes.
+
 ## 3. The Residue Entry Schema
 
 **Schema ID:** `mesherra.provenance/entry-v1`
@@ -260,7 +311,7 @@ For each of Agent A's ledger and Agent B's ledger:
 
 1. **Two entries** exist (sequence 0 and 1).
 2. **Hash chain valid:** entry 1's `previous_hash` equals the SHA-256 (JCS-canonical) of entry 0.
-3. **Every signature verifies** against its `actor`'s public key.
+3. **Every signature verifies** against its `ledger_owner`'s public key. (Per §3: each ledger owner signs their own entries — including receive entries, which are the receiver's acknowledgment of what they observed. The `actor` field records who *performed* the action; the `ledger_owner` field records who *signed* the entry. They are equal on emit entries and differ on receive entries.)
 4. **Sequence ordering:** sequence 0 entry's `timestamp` ≤ sequence 1 entry's `timestamp`.
 
 ### Cross-ledger paired assertions
@@ -303,46 +354,65 @@ A third process (`run_demo.py`) orchestrates: starts A and B, triggers A to init
 [orchestrator] start Agent A and Agent B on their ports
 [orchestrator] trigger: "Agent A, schedule 30 min with Agent B this week"
 
-[Agent A]
+[Agent A — pre-send]
   1. Read agent_a_calendar.json (synthetic).
   2. Compute 3 candidate open slots in the next 7 days (deterministic, no LLM).
   3. Build proposal payload conforming to meshycal.scheduling/proposal-v1.
   4. Compute payload_hash = SHA-256(JCS(payload)).
-  5. Build residue entry (sequence=0, action_type=emit, operation=proposal,
-     payload_hash, ...).
-  6. Sign entry with A's Ed25519 key.
-  7. Append signed entry to A's SQLite ledger.
-  8. Open A2A Task targeting Agent B:
-     - context_id: new UUID
-     - Message Parts: [Part.data containing the proposal payload]
-     - Artifact.metadata: { "mesherra.provenance.entry_hash": SHA-256(JCS(entry)) }
-  9. Wait for response.
+  5. Build SendClaim {payload_hash, payload_schema, operation=proposal,
+     sender_principal_id=user-a@phase1.local, context_id=new UUID, timestamp=now()}.
+  6. Sign SendClaim canonical bytes with A's Ed25519 key → send_claim_signature.
+  7. Open A2A Task targeting Agent B (task_id is empty; A2A assigns):
+     - context_id: from step 5
+     - Message.parts: [Part.data containing the proposal payload]
+     - Message.metadata (per ARCHITECTURE.md §13.10):
+         "mesherra.send_claim.sender_principal_id":  "user-a@phase1.local"
+         "mesherra.send_claim.payload_schema":       "meshycal.scheduling/proposal-v1"
+         "mesherra.send_claim.operation":            "proposal"
+         "mesherra.send_claim.timestamp":            <ISO-8601>
+         "mesherra.send_claim.signature":            <base64 Ed25519 sig>
+  8. Send via adapter.send_envelope(...). Await response.
 
-[Agent B] (via A2A SDK Adapter receiving the Task message)
-  1. Receive A's Message.
-  2. Extract proposal payload.
-  3. Validate against meshycal.scheduling/proposal-v1 schema.
-  4. Verify A's signature on the entry-hash claim against A's known public key
-     (Phase 1: public keys are hardcoded in agent config).
-  5. Build a "receive" entry mirroring A's (sequence=0, action_type=receive,
-     operation=proposal, payload_hash=same, ...).
-  6. Sign and append to B's SQLite ledger.
-  7. Pick one slot from candidates (deterministic: first available).
-  8. Build acceptance payload (proposal-v1 with candidates.length == 1).
-  9. Compute payload_hash for acceptance.
-  10. Build residue entry (sequence=1, action_type=emit, operation=acceptance,
-      previous_hash = SHA-256(JCS(entry 0)), ...).
-  11. Sign and append to B's SQLite ledger.
-  12. Send acceptance back via A2A SendMessage on the same context_id.
+[Agent B — on receive]
+  1. Receive A's Message via the A2A SDK Adapter; convert to MesherraEnvelope.
+  2. Schema-validate envelope.payload against meshycal.scheduling/proposal-v1.
+  3. Resolve A's public key (Phase 1: hardcoded in agent config; Phase 2: Identity Directory).
+  4. Verify A's SendClaim signature:
+     - Reconstruct SendClaim from envelope fields (computing payload_hash from envelope.payload).
+     - canonical_bytes = JCS(SendClaim.model_dump(mode="json"))
+     - Verifier.verify(canonical_bytes, envelope.send_claim_signature) must be True.
+     - If False, reject with A2A authentication error.
+  5. Build B's receive Residue (sequence=0, action_type=receive, operation=proposal,
+     task_id = envelope.task_id (A2A-assigned), payload_hash=same as envelope's, ...).
+  6. Sign with B's Ed25519 key over canonical Residue (signature field omitted).
+  7. Append to B's SQLite ledger.
+  8. Pick one slot from candidates (deterministic: first available).
+  9. Build acceptance payload (proposal-v1 with candidates.length == 1).
+  10. Build B's SendClaim for the acceptance (sender=B, operation=acceptance, etc.);
+      sign with B's key. The response's `operation` is part of the signed SendClaim,
+      so B's scheduling agent must pick `OutgoingResponse.operation` deliberately
+      (do not echo `envelope.operation` — the response is a different semantic claim).
+  11. Build B's emit Residue (sequence=1, action_type=emit, operation=acceptance,
+      previous_hash = SHA-256(JCS(entry 0 signature-omitted)), ...).
+  12. Sign with B's key; append to B's ledger.
+  13. Return acceptance envelope (payload + SendClaim signature) as the A2A response.
 
-[Agent A]
-  10. Receive B's acceptance.
-  11. Validate, verify B's signature.
-  12. Build receive entry (sequence=1, action_type=receive, operation=acceptance,
-      previous_hash = SHA-256(JCS(entry 0)), ...).
-  13. Sign and append.
-  14. Mark Task COMPLETED in A2A; emit final Artifact with both signed entries
-      embedded in Artifact.metadata.
+[Agent A — on response]
+  9. Receive B's response envelope. Note: response.task_id is now the A2A-assigned UUID.
+  10. Verify B's SendClaim signature on the acceptance envelope.
+  11. Build A's emit Residue for the original proposal (sequence=0, action_type=emit,
+      operation=proposal, task_id = response.task_id, payload_hash from step 4, ...).
+  12. Sign with A's key; append to A's ledger.
+  13. Build A's receive Residue for the acceptance (sequence=1, action_type=receive,
+      operation=acceptance, previous_hash = SHA-256(JCS(entry 0 signature-omitted)),
+      payload_hash = SHA-256(JCS(acceptance payload)), ...).
+  14. Sign with A's key; append.
+
+Key ordering note: each ledger entry is built and signed AFTER the relevant A2A
+roundtrip has completed (so that task_id is known). The wire-level SendClaim
+signature is the trust commitment that travels with the message; the ledger-level
+Residue signature is the per-side accountability commitment that stays with each
+agent's record. Same key, different objects, different purposes.
 
 [orchestrator]
   After both processes signal done:

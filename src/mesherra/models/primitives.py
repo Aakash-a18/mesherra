@@ -22,7 +22,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # -- Layers ----------------------------------------------------------------
 
 
@@ -86,11 +85,98 @@ class Operation(str, Enum):
     REJECTION = "rejection"
 
 
-# -- Residue (Phase 1 implementation) -------------------------------------
+# -- Pattern helpers ------------------------------------------------------
 
 
 _HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _HEX64_OR_EMPTY_PATTERN = re.compile(r"^([0-9a-f]{64}|)$")
+
+
+# -- SendClaim (pre-send signed object on the A2A wire) -------------------
+
+
+class SendClaim(BaseModel):
+    """The signed object on the A2A wire that attests "the sender really sent
+    this payload, with this semantic operation, in this context at this time."
+
+    Per ARCHITECTURE.md §13.10 and SPEC §2a (SendClaim schema). A SendClaim is
+    signed BEFORE the message hits the wire (so before A2A assigns the
+    ``task_id``), and the signature travels in ``Message.metadata`` for the
+    receiver to verify. The receiver reconstructs the canonical SendClaim
+    bytes from the envelope fields they were given, hashes, and verifies the
+    sender's signature.
+
+    The SendClaim is intentionally *separate* from Residue:
+
+    * **SendClaim** lives on the wire, is signed pre-send, and contains only
+      fields known before the A2A roundtrip (so no task_id, no sequence, no
+      previous_hash, no ledger state). The six fields are:
+      ``payload_hash``, ``payload_schema``, ``operation``,
+      ``sender_principal_id``, ``context_id``, ``timestamp``.
+    * **Residue** lives in each ledger, is signed post-roundtrip (once the
+      A2A-assigned ``task_id`` is known), and contains the ledger-relative
+      fields (sequence, previous_hash, etc.). Each ledger owner signs their
+      own Residue with their own key.
+
+    Both signatures are by the same actor (the sender) but over different
+    objects with different purposes:
+
+    * SendClaim signature → "I really sent this payload as this operation"
+    * Residue signature → "I attest this is my ledger view of the exchange"
+
+    The ``operation`` field is included in the signed payload to preserve
+    tessera fit: the receiver branches on it (e.g., MeshyCal acceptance vs
+    counter), and an unsigned ``operation`` would let an in-transit attacker
+    flip ``proposal`` → ``acceptance`` while the SendClaim still verified.
+    The two halves would *appear* to fit while attesting different semantic
+    claims — A signed "I sent these bytes," B acted on a different operation
+    than A signed. Signing ``operation`` closes the gap and keeps the
+    invariant: the halves either fit on every signed sub-field, or they
+    don't fit at all.
+
+    Phase 1's ``timestamp`` provides a small amount of replay defense;
+    Phase 2+ will layer nonces on top.
+
+    Schema ID: ``mesherra.a2a_adapter/send-claim-v1``
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={
+            "$id": "mesherra.a2a_adapter/send-claim-v1",
+            "title": "Mesherra A2A SendClaim v1",
+        },
+    )
+
+    payload_hash: str
+    payload_schema: str = Field(min_length=1)
+    operation: Operation
+    sender_principal_id: str = Field(min_length=1)
+    context_id: str = Field(min_length=1)
+    timestamp: str = Field(min_length=1)
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, v: str) -> str:
+        if not _HEX64_PATTERN.match(v):
+            raise ValueError(
+                "payload_hash must be exactly 64 lowercase hexadecimal "
+                "characters (SHA-256 hex digest of the canonical payload)"
+            )
+        return v
+
+    def to_signing_bytes_input(self) -> dict[str, Any]:
+        """Return the dict form for canonical encoding by the signer/verifier.
+
+        The signer computes ``signature = Signer.sign(canonical_json(this_dict))``;
+        the verifier reconstructs the same dict from envelope fields and runs
+        the same ``canonical_json`` + ``Verifier.verify`` pair.
+        """
+        return self.model_dump(mode="json")
+
+
+# -- Residue (Phase 1 implementation) -------------------------------------
 
 
 class Residue(BaseModel):

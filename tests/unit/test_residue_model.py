@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from jcs import canonicalize
 from pydantic import ValidationError
 
+from mesherra.crypto.primitives import canonical_json as canonicalize
 from mesherra.models.primitives import ActionType, Operation, Residue
 
 SCHEMA_PATH = (

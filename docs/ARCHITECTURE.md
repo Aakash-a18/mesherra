@@ -116,6 +116,13 @@ Residue is the foundation of any liability/recourse layer. It is *descriptive* (
 1. The **share mode** at original disclosure (reference vs copy)
 2. An **explicit term** the owner attached at share time
 
+**Two signed objects per exchange (not one):** Mesherra signs at two layers with two distinct objects. See §13.10 for the full rationale, but in brief:
+
+* **SendClaim** — signed pre-send, lives on the A2A wire, attests "the sender really sent this payload, with this semantic operation, in this context at this time." Verifiable by the receiver from wire fields alone.
+* **Residue** — signed post-response by each ledger owner, lives in their ledger, attests "this is my view of what happened." Contains ledger-relative fields (`sequence`, `previous_hash`, post-response `task_id`) that the wire cannot carry.
+
+Both are signed by the same actor (the sender, for their outbound). They are not the same signature: same key, different objects, different purposes. The cross-ledger linkage between A's emit entry and B's receive entry is via shared fields (`payload_hash`, `task_id`, `context_id`, `payload_schema`); each side independently signs their own Residue with their own key.
+
 ### 3.7 Object data flow across boundaries
 
 This subsection extends 3.2 (Object) with the data-flow semantics that govern how Objects move between agents and across trust boundaries. It is a foundational architectural commitment: every Object has exactly one canonical source of truth, and every observer sees a derivative.
@@ -459,7 +466,7 @@ Mesherra makes specific security guarantees and explicitly does not make others.
 |---|---|
 | Agent impersonation (someone claims to be User1's agent) | Identity Directory + signed AgentCards verified on every interaction |
 | AgentCard tampering | Signed cards; signature verified through Directory |
-| Replay attacks | Signed payloads with timestamps and nonces; Provenance Ledger rejects duplicate `task.id` |
+| Replay attacks | Signed SendClaim with timestamp (Phase 1: weak — catches large clock skew only). Phase 2: add nonce + clock-skew tolerance window in the Inbound Gateway; Provenance Ledger gains duplicate-`task.id` rejection. |
 | Over-disclosure by the sender's own agent | Outbound Gateway scopes against Policy Engine before send |
 | Acceptance from unverified senders | Inbound Gateway requires verified identity before any delivery |
 | Tampering with agreed terms post-hoc | Signed Artifact with provenance hash; both sides hold matching signatures |
@@ -557,33 +564,66 @@ Ships in Python first (matches `a2a-sdk` Python SDK), JS/TS second (for browser 
 
 ### 13.2 Outbound Gateway
 
-Intercepts every outgoing message before it reaches A2A.
+Intercepts every outgoing message before it reaches A2A, and lands the matching residue entry once the A2A roundtrip completes.
 
-Responsibilities:
+#### Concrete outbound pipeline (ordered)
 
-- Receive `send_to()` calls from the SDK
-- Consult Policy Engine for allow/scope decision
-- Consult Identity Directory to resolve peer to verified endpoint
-- Invoke Crypto Primitives for signing
-- Write provenance entry to Ledger
-- Pass envelope to A2A SDK Adapter
+The pipeline splits across the A2A roundtrip — some work happens pre-send, the rest happens post-response.
 
-Hard rule: there is no path from consumer code to the A2A wire that bypasses this gateway. All outbound traffic goes through here.
+**Pre-send (before the A2A wire):**
+
+1. **Policy decision.** Consult the Policy Engine (§13.4) for `allow / allow_scoped / block / escalate` on the outbound payload. For `allow_scoped`, narrow the payload to permitted fields.
+2. **Peer resolution.** Consult the Identity Directory (§13.5) to resolve the peer principal to a verified URL.
+3. **SendClaim signing.** Compute `payload_hash = SHA-256(JCS(payload))`. Build a `SendClaim` (payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp). Sign the canonical JCS bytes via Crypto Primitives (§13.9). Place the signature in the envelope's `send_claim_signature` field.
+4. **Hand to A2A SDK Adapter.** Adapter sends; awaits response.
+
+**Post-response (after A2A returns with the assigned `task_id`):**
+
+5. **Verify peer's SendClaim** on the response. The gateway reconstructs the canonical SendClaim from the response envelope's fields and verifies the signature against the peer's published public key. Failed verification raises and aborts the post-response pipeline — no residue entries are written. (Phase 1 chose this strict ordering over the looser "log-and-continue" stance: if we can't authenticate the response, there's nothing to record. Phase 2+ may add a `rejected` Residue operation that captures verification failures forensically.)
+6. **Build and sign emit Residue.** With the now-known `task_id` (obtained from `adapter.send_envelope()`'s returned response envelope's `task_id` field), build the outbound emit Residue (sequence = ledger.next_sequence, previous_hash = ledger.head_hash, payload_hash matches the SendClaim's). Sign the canonical Residue bytes with this user's key.
+7. **Append emit Residue to Provenance Ledger** (§13.8). Validation in `ledger.append()` enforces sequence monotonicity and chain integrity; raises if anything is off.
+8. **Build, sign, and append receive Residue** for the response (sequence = ledger.next_sequence, previous_hash = the just-appended emit's hash).
+
+Why the split: A2A 1.0 assigns `task_id` only after the server-side roundtrip. The signed Residue needs `task_id`, so Residue construction cannot happen pre-send. The SendClaim (which is signable pre-send because it has no `task_id` field) carries the cross-side trust commitment on the wire; the Residue carries per-side accountability in the ledger. See §3.6 and §13.10 for the trust model.
+
+#### Hard rule
+
+There is no path from consumer code to the A2A wire that bypasses the Outbound Gateway. All outbound traffic goes through here.
 
 ### 13.3 Inbound Gateway
 
-Intercepts every incoming A2A message before it reaches any consumer handler.
+Sits between the A2A SDK Adapter (§13.10) and the consumer's agent handler. Owns every trust decision on incoming messages. No consumer code ever receives raw envelopes.
 
-Responsibilities:
+#### Concrete inbound pipeline (ordered)
 
-- Receive raw envelope from A2A SDK Adapter
-- Verify signature via Crypto Primitives
-- Resolve sender via Identity Directory
-- Consult Policy Engine for accept/reject/escalate decision
-- Write provenance entry to Ledger
-- Deliver scoped, verified payload to consumer's registered handler
+When the adapter delivers a `MesherraEnvelope` via the registered `InboundHandler`, the gateway runs this pipeline:
 
-Hard rule: no consumer code receives raw A2A messages. Everything inbound passes through here first.
+1. **Schema check.** Resolve `envelope.payload_schema` against the Schema Registry (§13.11). If unknown or `envelope.payload` does not validate, reject. → A2A `InvalidParamsError` response; agent handler is NOT invoked.
+2. **Sender resolution.** Look up `envelope.sender_principal_id` in the Identity Directory (§13.5). If unknown/unverified, reject. → A2A `InvalidAgentResponseError`.
+3. **SendClaim verification.** Construct a `Verifier` from the resolved principal's public key. Reconstruct the canonical `SendClaim` bytes from the envelope: `{payload_hash = SHA-256(JCS(envelope.payload)), payload_schema, operation, sender_principal_id, context_id, timestamp}`. Verify `envelope.send_claim_signature` against those canonical bytes. If verification fails, reject. → A2A authentication error.
+4. **Policy decision.** Ask the Policy Engine (§13.4) for an `allow / allow_scoped / block / escalate` verdict against the user's signed policy version. Apply the verdict — for `allow_scoped`, narrow the payload to the policy-permitted fields.
+5. **Residue write.** Build a `receive` Residue entry for this exchange (the A2A-assigned `task_id` is now known — it's on `envelope.task_id`). Sign with this user's key. Append to the per-user Provenance Ledger (§13.8). This happens *after* all verification steps so the ledger only contains observations the gateway has accepted as trustworthy.
+6. **Agent invocation.** Call the registered consumer handler with the verified (and possibly scoped) envelope. The handler's return envelope flows back through the gateway, which:
+   - Builds and signs the gateway's `emit` Residue for the response.
+   - Wraps the response in a new SendClaim signed by this user.
+   - Returns the new envelope through the adapter as the A2A response.
+
+Rejected messages produce an A2A-level error response. The agent handler is not invoked for rejected messages. Phase 2+ may additionally record `rejected`-operation entries in the ledger for forensic purposes; Phase 1 only records successful interactions per SPEC §1.
+
+#### Registration topology
+
+```
+Consumer agent     ──registers──▶  Inbound Gateway  ──registers──▶  A2AAdapter
+                                                                      │
+                                                                      ▼
+                                                                    A2A wire
+```
+
+The consumer never sees the adapter; the gateway never appears in adapter signatures. This keeps trust enforcement uncircumventable: the only way for a consumer to receive A2A traffic is through the gateway.
+
+#### Hard rule
+
+No consumer code receives raw A2A messages. Everything inbound passes through the gateway first.
 
 ### 13.4 Policy Engine
 
@@ -658,16 +698,131 @@ Provides:
 
 ### 13.10 A2A SDK Adapter
 
-The only module in Mesherra that imports `a2a-sdk`.
+The only module in Mesherra that imports `a2a-sdk`. Strict isolation: if A2A changes, only this module changes.
 
-Responsibilities:
+#### What a2a-sdk gives us (we consume, do not re-shape)
 
-- Wrap A2A's `SendMessage`, `GetTask`, `SubscribeToTask`, push notifications
-- Translate Mesherra's envelope format ↔ A2A's `Message`, `Part`, `Artifact`
-- Map A2A `TaskState` transitions onto Mesherra events (e.g., `INPUT_REQUIRED` → butler escalation, `AUTH_REQUIRED` → identity re-verification)
-- Embed signed provenance metadata into A2A `Artifact.metadata` on task completion
+Google's A2A SDK ships protobuf-defined wire types (`a2a.types`) plus async client and server frameworks (`a2a.client.Client`, `a2a.server.agent_execution.AgentExecutor`). Wire types are **protobuf messages, not Pydantic models** — they are constructed imperatively (e.g. `Message(message_id=..., parts=[...])`) and serialized via `.SerializeToString()` / `.FromString()`. Any contributor coming from steps 1–3 of this codebase will expect Pydantic; the adapter is the layer where that expectation breaks.
 
-Strict isolation: if A2A changes, only this module changes. No other module in Mesherra imports `a2a-sdk` or references A2A types directly.
+The Mesherra core depends on the following `a2a-sdk` extras (declared as `a2a-sdk[http-server,sqlite,signing]` in `pyproject.toml`):
+
+- `http-server` — pulls in `starlette` and `sse-starlette`. Required by the per-agent listener (see §13.10 "Server location").
+- `sqlite` — pulls in `sqlalchemy[aiosqlite]`. Required by the SDK's internal task tracking on the server side (independent of Mesherra's own Provenance Ledger).
+- `signing` — pulls in `pyjwt`. Required by the server's AgentCard signature path; Phase 1 does not exercise it but the dep is needed for the server to construct.
+
+These are **core** Mesherra dependencies, not optional. Every concrete deployment either sends messages, receives messages, or both, and the install footprint is acceptable. We do not split into `mesherra[server]` extras because every running Delegation ends up needing the full set.
+
+#### Two signed objects, two purposes
+
+Mesherra signs at two layers, with two distinct signed objects:
+
+* **SendClaim** — signed *pre-send* by the sender. Lives on the A2A wire. Attests "I really sent this payload, with this semantic operation, in this context at this time." Verifiable by the receiver using only fields available on the wire. Defined in `mesherra.models.primitives.SendClaim`. Schema: `{payload_hash, payload_schema, operation, sender_principal_id, context_id, timestamp}`.
+* **Residue** — signed *post-response* by each ledger owner over their own ledger entry. Anchors per-side accountability. Contains ledger-relative fields (`sequence`, `previous_hash`) that the wire cannot carry. Defined in `mesherra.models.primitives.Residue`.
+
+Both signatures are by the same actor on the sender side (A signs both A's SendClaim and A's emit Residue), but the two objects serve different purposes and live in different places. The receiver verifies the SendClaim signature inline at receive time (gateway pipeline step 3); the Residue signature exists purely for post-hoc audit of each ledger.
+
+Why the split: A2A 1.0 assigns `task_id` only after the server-side roundtrip. A Residue is signed with `task_id` *inside* its canonical bytes, so the sender cannot sign a Residue before sending. The SendClaim is the largest signable object that has no dependency on `task_id`. See SPEC §2a (SendClaim schema) and the Phase 1 design decision notes.
+
+#### MesherraEnvelope: the boundary type
+
+The adapter exposes a single Pydantic model — `MesherraEnvelope` — that all upstream Mesherra code uses. No other module in Mesherra ever touches a protobuf message.
+
+```python
+class MesherraEnvelope(BaseModel):
+    task_id: str = ""           # empty on first send; A2A assigns and returns on response
+    context_id: str
+    sender_principal_id: str
+    payload: dict[str, Any]
+    payload_schema: str
+    operation: Operation        # PROPOSAL/COUNTER/ACCEPTANCE/REJECTION; signed as part of the SendClaim
+    timestamp: str              # ISO-8601 UTC when sender prepared the send
+    send_claim_signature: str   # base64 Ed25519 over canonical(SendClaim)
+```
+
+This is the boundary shape. The adapter is the single translator between this and the A2A wire format.
+
+#### Wire format mapping
+
+| MesherraEnvelope field | A2A Message location |
+|---|---|
+| `task_id` | `Message.task_id` |
+| `context_id` | `Message.context_id` |
+| `payload` (dict) | `Message.parts[0]` as `Part.data` (Value wrapping a Struct) |
+| `payload_schema` | `Message.metadata["mesherra.send_claim.payload_schema"]` |
+| `sender_principal_id` | `Message.metadata["mesherra.send_claim.sender_principal_id"]` |
+| `timestamp` | `Message.metadata["mesherra.send_claim.timestamp"]` |
+| `send_claim_signature` | `Message.metadata["mesherra.send_claim.signature"]` |
+| `operation` | `Message.metadata["mesherra.send_claim.operation"]` |
+| (implicit) | `Message.role = ROLE_AGENT` |
+
+Single sub-namespace under `mesherra.*`:
+
+* **`mesherra.send_claim.*`** — every Mesherra-namespaced metadata key lives here in Phase 1, because every wire-side trust-relevant field is signed as part of the SendClaim. Receiver verifies these against the sender's published public key. `operation` was promoted into this namespace during Phase 1 review: under the older `mesherra.payload.operation` layout an in-transit attacker could flip PROPOSAL↔ACCEPTANCE without invalidating the signature, then the receiver (which branches on `operation`) would honor it. Signing `operation` closes that gap.
+
+The `mesherra.*` namespace on metadata keys is reserved. Consumers MUST NOT use this prefix for their own metadata.
+
+The Residue does NOT travel on the wire. Each ledger owner constructs their own Residue post-response and signs it with their own key (per the Outbound Gateway and Inbound Gateway pipelines in §13.2 and §13.3). The receiver does not need the sender's Residue bytes for any Phase 1 trust property — the cross-ledger linkage is via shared fields (`payload_hash`, `task_id`, `context_id`, `payload_schema`) and the wire-level SendClaim signature.
+
+**Known unsigned wire field — `task_id`.** Every Mesherra-namespaced wire field is part of the signed SendClaim *except* `task_id`, which travels on the envelope but is not in the SendClaim. This is forced by A2A 1.0: `task_id` is assigned by the receiver's server post-roundtrip, so the sender cannot sign it pre-send. The threat profile is bounded — unlike the (now-closed) unsigned-`operation` case, a flipped `task_id` cannot coerce either party into appearing to agree to anything they didn't. It can only corrupt the cross-ledger linkage invariant (the two ledgers' entries for the same exchange would no longer share `task_id` and could not be paired in an audit). Phase 1 accepts this as a known limitation. Phase 2+ may add a post-roundtrip second signature (over the now-known `task_id`) if cross-ledger linkage integrity needs to be enforceable on each side rather than only mutually agreed.
+
+#### Adapter API surface (Phase 1)
+
+```python
+class A2AAdapter:
+    """The single bridge between Mesherra and a2a-sdk."""
+
+    # Outbound (client side). Always available.
+    async def send_envelope(
+        self,
+        peer_url: str,
+        envelope: MesherraEnvelope,
+    ) -> MesherraEnvelope:
+        """Send envelope to peer; await peer's response envelope."""
+
+    # Inbound (server side). Started by the per-agent process.
+    def register_handler(self, handler: InboundHandler) -> None:
+        """Register the callback that receives RAW envelopes from the wire."""
+
+    async def start_listener(self, host: str, port: int) -> ListenerHandle:
+        """Start the per-agent A2A HTTP listener. Returns a graceful-shutdown handle."""
+
+    # Phase 2/3 surface (NotImplementedError in Phase 1)
+    async def subscribe_to_task(self, task_id: str) -> AsyncIterator[StateUpdate]: ...
+```
+
+The `InboundHandler` Protocol:
+
+```python
+class InboundHandler(Protocol):
+    async def __call__(self, envelope: MesherraEnvelope) -> MesherraEnvelope | None:
+        """Process inbound envelope; optionally return response envelope.
+
+        The adapter delivers RAW envelopes — no trust decisions are made at this
+        layer. The Inbound Gateway (§13.3) is the next layer up; IT owns
+        verification, ledger writes, and policy. Consumers register with the
+        Gateway; the Gateway registers with the adapter.
+
+        Return None for fire-and-forget. Return an envelope to send back as
+        the A2A response on the same task.
+        """
+```
+
+#### Server location: per-agent process
+
+Each running agent process (e.g., a MeshyCal scheduling agent on `localhost:8001`) calls `start_listener(host, port)` to serve its own A2A endpoint. There is no central Mesherra-managed listener — the SDK supports such a layout, but Phase 1 does not require it. This decision matches:
+
+- The Google A2A reference examples' deployment model
+- The SPEC §6 two-process demo flow (Agent A on 8001, Agent B on 8002)
+- Build discipline #4 (ride the SDK — don't add an extra Mesherra router)
+
+If a future deployment wants a fan-out router, it can be added as a new component without changing the adapter API.
+
+#### Strict isolation (enforced)
+
+- `a2a-sdk` may be imported only by files under `src/mesherra/a2a_adapter/`.
+- `MesherraEnvelope` is the *only* type that crosses out of this module to other Mesherra code.
+- No other Mesherra module references `a2a.types.*`, `a2a.client.*`, or `a2a.server.*`.
+- A test asserts this (Phase 1.5+) via grep on the source tree.
 
 ### 13.11 Schema Registry
 

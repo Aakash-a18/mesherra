@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Trust layer for agent-to-agent (A2A) interaction"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "TBD" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Mesherra contributors" }]
 keywords = ["a2a", "agents", "trust", "provenance", "identity"]
 classifiers = [
@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "a2a-sdk",                  # Google's Agent2Agent SDK; the substrate we build on
+    "a2a-sdk[http-server,sqlite,signing]",  # Google's Agent2Agent SDK + server/sqlite/signing extras (per ARCHITECTURE.md §13.10)
     "cryptography>=42.0",       # Signing, hashing, key management (Ed25519)
     "pydantic>=2.0",            # Structured models for primitives and payloads
     "pydantic-settings>=2.0",   # Env-var configuration (fail-fast on missing values)

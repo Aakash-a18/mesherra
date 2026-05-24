@@ -107,7 +107,7 @@ mesherra/
 
 | Phase | What ships | Status |
 |---|---|---|
-| **Phase 1** | Provenance vertical slice: signed entries, hash-chained ledger, two-process localhost demo with 14 end-state assertions | Spec'd; build next |
+| **Phase 1** | Provenance vertical slice: signed entries, hash-chained ledger, two-process localhost demo with 14 end-state assertions | Steps 1–5 implemented (provenance ledger, crypto, A2A adapter, signed-SendClaim gateways); demo flow + MeshyCal integration in progress |
 | **Phase 1.5** | Guest principal lifecycle (driven by MeshyCal invitee flow) | Open question |
 | **Phase 2** | Identity verification: verified directory, signed AgentCard resolution | Architecture complete |
 | **Phase 3** | Scoped disclosure: field-level policy enforcement, Schema Registry | Architecture complete |
@@ -127,7 +127,7 @@ The build order is enforced by discipline (`CLAUDE.md`): provenance first (recor
 8. No real user data in the repo, ever. Synthetic only. Git history is forever.
 9. Don't abstract MeshyCal prematurely. The Delegation Authoring SDK emerges from Delegation #2, not from speculation inside #1.
 
-## Setup (once Phase 1 code lands)
+## Setup
 
 ```bash
 git clone https://github.com/Aakash-a18/mesherra.git
@@ -141,13 +141,13 @@ All configuration is environmental. The application fails fast at startup if a r
 
 ## Status & honest expectations
 
-This is **pre-alpha**. Nothing runs yet. The repo contains:
+This is **pre-alpha**, but the trust layer's core is implemented and tested. The repo contains:
 
 - Comprehensive documentation (architecture, strategy, diagrams)
-- A Python source skeleton matching the architecture (every module currently `raise NotImplementedError`)
-- A Phase 1 demo specification ready to be implemented against
+- Phase 1 steps 1–5 implemented and tested (134 passing tests): hash-chained provenance ledger, Ed25519 sign/verify primitives, A2A wire adapter, and inbound/outbound gateways producing signed `SendClaim` records with `operation` binding
+- A Phase 1 demo specification, with the two-process MeshyCal demo (step 6) still to wire up
 
-If you're looking for code that does something today, this isn't it — yet. If you're looking for disciplined infrastructure thinking with a coherent architecture, an explicit threat model, and a clear build path, you're in the right place.
+What is **not** yet built: the end-to-end two-process demo (Phase 1 step 6), identity verification / signed AgentCard resolution (Phase 2), and scoped disclosure / field-level policy enforcement (Phase 3). If you want a finished trust layer today, this isn't it yet. If you want disciplined infrastructure thinking with a coherent architecture, an explicit threat model, a clear build path, and a verifiable core already in place, you're in the right place.
 
 ## Contributing
 
