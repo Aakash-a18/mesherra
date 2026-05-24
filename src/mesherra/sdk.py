@@ -50,6 +50,12 @@ from mesherra.gateways.outbound import OutboundGateway, OutboundResult
 from mesherra.gateways.replay import ReplayProtector
 from mesherra.identity import DirectoryClient
 from mesherra.models.primitives import Operation, Residue
+from mesherra.policy import (
+    PolicyEngine,
+    PolicyStore,
+    SignedPolicyDoc,
+    sign_policy_doc,
+)
 from mesherra.provenance.ledger import ProvenanceLedger
 
 
@@ -82,6 +88,8 @@ class Mesherra:
         ledger: ProvenanceLedger,
         adapter: A2AAdapter,
         directory: DirectoryClient,
+        policy_store: PolicyStore | None = None,
+        policy_engine: PolicyEngine | None = None,
         replay_protector: ReplayProtector | None = None,
     ) -> None:
         if ledger.ledger_owner != principal_id:
@@ -103,12 +111,24 @@ class Mesherra:
         # ReplayProtector (typically for tests that need a controllable
         # clock); production usage falls through to MESHERRA_CLOCK_SKEW_SECONDS.
         self._replay_protector = replay_protector or ReplayProtector.from_env()
+        # Phase 3 policy enforcement (ARCH §13.4 / §13.6). Both arguments are
+        # optional: passing a ``policy_store`` activates outbound + inbound
+        # scoping (with default-deny on unmatched schemas per SPEC §2.2);
+        # omitting it puts the gateways in bypass mode for Phase 1/2 test
+        # surfaces. If a store is provided without an explicit engine, a
+        # default ``PolicyEngine()`` is constructed (stateless; no config).
+        self._policy_store = policy_store
+        self._policy_engine = policy_engine or (
+            PolicyEngine() if policy_store is not None else None
+        )
         self._outbound = OutboundGateway(
             principal_id=principal_id,
             signer=signer,
             ledger=ledger,
             adapter=adapter,
             directory=self._directory,
+            policy_store=self._policy_store,
+            policy_engine=self._policy_engine,
         )
         self._inbound = InboundGateway(
             principal_id=principal_id,
@@ -116,6 +136,8 @@ class Mesherra:
             ledger=ledger,
             directory=self._directory,
             replay_protector=self._replay_protector,
+            policy_store=self._policy_store,
+            policy_engine=self._policy_engine,
         )
         # Wire the inbound gateway into the adapter. No consumer is
         # registered yet; :meth:`on_message` does that.
@@ -236,12 +258,34 @@ class Mesherra:
             "resolve; consumers do not need to verify cards by hand."
         )
 
-    def get_policy(self) -> Any:
-        raise NotImplementedError(
-            "get_policy is implemented in Phase 3 (Policy Engine)."
-        )
+    def get_policy(self) -> SignedPolicyDoc:
+        """Return the current signed policy from the PolicyStore.
 
-    def update_policy(self, policy: Any) -> Any:
-        raise NotImplementedError(
-            "update_policy is implemented in Phase 3 (Policy Engine)."
-        )
+        Raises :class:`mesherra.policy.PolicyNotFound` if no policy has
+        been saved for this principal. Raises ``RuntimeError`` if this
+        Mesherra instance was constructed without a ``policy_store``
+        (bypass mode — there is no policy to return).
+        """
+        if self._policy_store is None:
+            raise RuntimeError(
+                "This Mesherra instance has no policy_store (bypass mode). "
+                "Construct Mesherra(... policy_store=...) to enable policy."
+            )
+        return self._policy_store.get_current()
+
+    def update_policy(self, doc: Any) -> SignedPolicyDoc:
+        """Sign ``doc`` with this principal's signing key and persist it.
+
+        ``doc`` must be a :class:`mesherra.policy.PolicyDoc`. The version
+        must be strictly greater than the latest stored version (the
+        store enforces monotonicity). Returns the resulting
+        :class:`SignedPolicyDoc`.
+        """
+        if self._policy_store is None:
+            raise RuntimeError(
+                "This Mesherra instance has no policy_store (bypass mode). "
+                "Construct Mesherra(... policy_store=...) to enable policy."
+            )
+        signed = sign_policy_doc(doc=doc, signer=self._signer)
+        self._policy_store.save_signed(signed)
+        return signed

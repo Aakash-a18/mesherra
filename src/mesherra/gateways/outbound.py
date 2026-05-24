@@ -2,19 +2,23 @@
 
 Implements ARCHITECTURE.md §13.2. The single airlock for outgoing messages.
 
-Phase 1 responsibilities (per the doc's ordered pipeline):
+Pipeline (Phase 1 + Phase 2 hardening + Phase 3 scoping):
 
 Pre-send:
-1. (Phase 2+ Policy decision — skipped in Phase 1)
-2. (Phase 2+ Peer resolution via Identity Directory — Phase 1 uses caller-supplied
-   public-key directory)
-3. SendClaim signing.
+1. Policy decision (Phase 3). Consult the PolicyEngine for the user's
+   signed policy against (payload, schema, direction=OUTBOUND). On
+   ALLOW_SCOPED, narrow the payload to permitted fields and re-check
+   that no blocked path survives (defense-in-depth). On BLOCK / ESCALATE,
+   raise rather than send. Bypassed entirely if no PolicyStore is
+   injected (preserves Phase 1/2 test surface).
+2. Peer resolution via Identity Directory (Phase 2).
+3. SendClaim signing over the *post-scoping* payload hash.
 4. Hand to A2A SDK Adapter.
 
 Post-response:
-5. Build and sign emit Residue (with now-known task_id from response).
-6. Append to Provenance Ledger.
-7. Verify peer's SendClaim on response.
+5. Verify peer's SendClaim on response.
+6. Build and sign emit Residue (with now-known task_id from response).
+7. Append to Provenance Ledger.
 8. Build and sign receive Residue for response. Append.
 
 The gateway is the only path from consumer code to the A2A wire.
@@ -36,6 +40,12 @@ from mesherra.crypto.primitives import (
 )
 from mesherra.identity import DirectoryClient, UnknownPrincipalError
 from mesherra.models.primitives import ActionType, Operation, Residue, SendClaim
+from mesherra.policy import (
+    Direction,
+    PolicyEngine,
+    PolicyStore,
+    Verdict,
+)
 from mesherra.provenance.ledger import ProvenanceLedger
 
 # -- Exceptions ----------------------------------------------------------
@@ -52,6 +62,38 @@ class PeerSignatureVerificationError(GatewayError):
     different bytes than they sent, or there was tampering in transit.
     The gateway raises rather than silently appending an unverified
     response residue.
+    """
+
+
+# -- Policy-decision exceptions (Phase 3) --------------------------------
+
+
+class PolicyBlocked(GatewayError):
+    """The policy engine refused this message (verdict = BLOCK).
+
+    Carries the engine's reason in the message so the operator can see
+    why the send was refused (default-deny on an unmatched schema, an
+    empty allow-list, or all fields removed). The send never reaches the
+    A2A wire; no Residue is written.
+    """
+
+
+class PolicyEscalationRequired(GatewayError):
+    """The policy engine returned ESCALATE.
+
+    Phase 3 v0 never produces this verdict (the engine has no conditional
+    rule types yet), but the gateway handles it defensively so a future
+    engine returning ESCALATE fails closed rather than silently sending.
+    """
+
+
+class PolicyScopingFailed(GatewayError):
+    """Defense-in-depth: the post-scope payload still contained a blocked path.
+
+    This indicates a bug in the engine — every matched outbound_block
+    path must be absent from the scoped payload. The gateway catches it
+    before signing the SendClaim so a buggy engine cannot leak data on
+    the wire.
     """
 
 
@@ -88,12 +130,23 @@ class OutboundGateway:
         ledger: ProvenanceLedger,
         adapter: A2AAdapter,
         directory: DirectoryClient,
+        policy_store: PolicyStore | None = None,
+        policy_engine: PolicyEngine | None = None,
     ) -> None:
         self._principal_id = principal_id
         self._signer = signer
         self._ledger = ledger
         self._adapter = adapter
         self._directory = directory
+        # Phase 3 policy enforcement (ARCH §13.4). If ``policy_store`` is
+        # None, the gateway runs in bypass mode (no engine call, all messages
+        # pass) — preserves Phase 1/2 test surfaces that never injected a
+        # store. When a store IS provided, the engine's default-deny stance
+        # kicks in for unmatched (schema, direction) per SPEC §2.2 step 2.
+        self._policy_store = policy_store
+        self._policy_engine = policy_engine or (
+            PolicyEngine() if policy_store is not None else None
+        )
 
     async def send(
         self,
@@ -116,6 +169,11 @@ class OutboundGateway:
             PeerSignatureVerificationError: peer's response did not verify.
             NotImplementedError: peer returned no response (fire-and-forget).
         """
+        # Step 1: Policy decision (Phase 3).
+        outgoing_payload = self._apply_outbound_policy(
+            payload=payload, payload_schema=payload_schema
+        )
+
         # Resolve the peer through the Directory up-front so an unknown
         # principal fails fast before we do any work. The resolved record
         # is used again post-response to verify the peer's SendClaim
@@ -125,11 +183,11 @@ class OutboundGateway:
         context_id = context_id or str(uuid.uuid4())
         send_timestamp = _utc_now_iso()
         nonce = str(uuid.uuid4())
-        payload_hash = content_hash(canonical_json(payload))
+        payload_hash = content_hash(canonical_json(outgoing_payload))
 
         outbound_envelope = self._build_outbound_envelope(
             context_id=context_id,
-            payload=payload,
+            payload=outgoing_payload,
             payload_hash=payload_hash,
             payload_schema=payload_schema,
             operation=operation,
@@ -200,6 +258,82 @@ class OutboundGateway:
         )
 
     # -- internals ------------------------------------------------------
+
+    def _apply_outbound_policy(
+        self, *, payload: dict[str, Any], payload_schema: str
+    ) -> dict[str, Any]:
+        """Run the user's policy on the outbound payload and return what
+        should actually go on the wire.
+
+        Bypass mode (no store injected) returns ``payload`` unchanged —
+        Phase 1/2 test surfaces never injected a store, and that
+        backwards-compatible path is explicit per SPEC §7.
+
+        With a store present, the engine's verdict drives the outcome:
+
+        * ALLOW          → return payload unchanged.
+        * ALLOW_SCOPED   → run defense-in-depth re-check, then return
+                            the engine's scoped payload.
+        * BLOCK          → raise :class:`PolicyBlocked`.
+        * ESCALATE       → raise :class:`PolicyEscalationRequired`.
+        """
+        if self._policy_store is None or self._policy_engine is None:
+            return payload
+        signed = self._policy_store.get_current()
+        decision = self._policy_engine.evaluate(
+            payload=payload,
+            payload_schema=payload_schema,
+            direction=Direction.OUTBOUND,
+            policy=signed.doc,
+        )
+        if decision.verdict is Verdict.ALLOW:
+            return payload
+        if decision.verdict is Verdict.ALLOW_SCOPED:
+            scoped = decision.scoped_payload or {}
+            self._assert_no_blocked_path_survived(
+                scoped=scoped,
+                payload_schema=payload_schema,
+                policy_rules=signed.doc.rules,
+            )
+            return scoped
+        if decision.verdict is Verdict.BLOCK:
+            raise PolicyBlocked(
+                f"Outbound payload (schema={payload_schema!r}) blocked by "
+                f"policy v{signed.doc.version}: {decision.reason}"
+            )
+        # ESCALATE: never produced by the v0 engine, but handled here so a
+        # future engine can't quietly bypass the airlock.
+        raise PolicyEscalationRequired(
+            f"Outbound payload (schema={payload_schema!r}) requires "
+            f"user escalation per policy v{signed.doc.version}. "
+            "Phase 3 v0 treats this as a refusal."
+        )
+
+    def _assert_no_blocked_path_survived(
+        self,
+        *,
+        scoped: dict[str, Any],
+        payload_schema: str,
+        policy_rules: list[Any],
+    ) -> None:
+        """Defense-in-depth: every outbound_block path in every matched rule
+        must be absent from the scoped payload. If anything survived, the
+        engine has a bug — raise rather than sign over the bytes."""
+        for rule in policy_rules:
+            if rule.match.schema_uri != payload_schema:
+                continue
+            if rule.match.direction not in (
+                Direction.OUTBOUND, Direction.BOTH
+            ):
+                continue
+            for path in rule.outbound_block or []:
+                if _path_present(scoped, path):
+                    raise PolicyScopingFailed(
+                        f"Defense-in-depth: blocked field {path!r} still "
+                        f"present in scoped payload (schema={payload_schema!r}). "
+                        "Engine returned ALLOW_SCOPED but did not strip "
+                        "the field. This is an engine bug — failing closed."
+                    )
 
     def _build_outbound_envelope(
         self,
@@ -306,3 +440,19 @@ class OutboundGateway:
 def _utc_now_iso() -> str:
     """Current UTC time as ISO-8601 with seconds precision and 'Z' suffix."""
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _path_present(payload: dict[str, Any], path: str) -> bool:
+    """Return True if the dotted ``path`` reaches a value in ``payload``.
+
+    Local helper rather than importing ``policy.engine._read_path`` —
+    keeps the gateway's defense-in-depth check independent of engine
+    internals (the engine is the thing being defended against; a shared
+    helper would be self-referential).
+    """
+    cur: Any = payload
+    for seg in path.split("."):
+        if not isinstance(cur, dict) or seg not in cur:
+            return False
+        cur = cur[seg]
+    return True
