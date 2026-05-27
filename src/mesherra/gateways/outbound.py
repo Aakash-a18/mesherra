@@ -48,6 +48,33 @@ from mesherra.policy import (
 )
 from mesherra.provenance.ledger import ProvenanceLedger
 
+# Phase 4 trust-layer operations on the outbound side. Mirrors the
+# inbound dispatch set in gateways/inbound.py: these operations carry
+# Mesherra's own promotion-lifecycle wire schemas (mesherra.object/*),
+# which the user's PolicyStore does not (and should not) have rules for.
+# Running the policy engine for them would default-deny under the
+# Phase 3 "no matching rule → BLOCK" stance — silently breaking every
+# Mesherra.promote() / fetch_object() call as soon as a real PolicyStore
+# is wired. The bypass keeps trust-layer ops protocol-level on both
+# directions and is symmetric with the inbound side.
+_OUTBOUND_TRUST_OPS = frozenset(
+    {
+        # Slice 1
+        Operation.PROMOTE,
+        Operation.FETCH,
+        Operation.FETCH_RESPONSE,
+        Operation.FETCH_DENIED,
+        # Slice 2 (SLICE_2_SPEC §3): same default-deny bypass for the
+        # subscribe / unsubscribe / object-update lifecycle, so a wired
+        # PolicyStore does not silently break Mesherra.subscribe_to_object,
+        # Mesherra.unsubscribe_from_object, or the owner's push path in
+        # update_object.
+        Operation.SUBSCRIBE,
+        Operation.UNSUBSCRIBE,
+        Operation.OBJECT_UPDATE,
+    }
+)
+
 # -- Exceptions ----------------------------------------------------------
 
 
@@ -107,10 +134,16 @@ class OutboundResult:
     Captures the peer's response payload plus the now-known A2A-assigned
     ``task_id`` (which the caller may need for subsequent operations
     within the same task).
+
+    ``response_payload_schema`` is required for Slice 2 callers (subscribe,
+    unsubscribe, object_update) where the ack and the denial share the
+    same response Operation but distinct schema URIs — the schema is the
+    only way to tell them apart at the SDK boundary.
     """
 
     response_payload: dict[str, Any]
     response_operation: Operation
+    response_payload_schema: str
     response_sender_principal_id: str
     task_id: str
     context_id: str
@@ -169,10 +202,20 @@ class OutboundGateway:
             PeerSignatureVerificationError: peer's response did not verify.
             NotImplementedError: peer returned no response (fire-and-forget).
         """
-        # Step 1: Policy decision (Phase 3).
-        outgoing_payload = self._apply_outbound_policy(
-            payload=payload, payload_schema=payload_schema
-        )
+        # Step 1: Policy decision (Phase 3) — bypassed for Phase 4 trust-
+        # layer operations. The bypass is symmetric with InboundGateway's
+        # trust-op handling: these carry protocol-level wire schemas
+        # (mesherra.object/*), not user-policy concerns, and the engine's
+        # default-deny stance on unmatched schemas would otherwise block
+        # every Mesherra.promote() / fetch_object() the moment a real
+        # PolicyStore is wired (the original Phase 3 design didn't
+        # anticipate trust-layer ops sharing the same airlock).
+        if operation in _OUTBOUND_TRUST_OPS:
+            outgoing_payload = payload
+        else:
+            outgoing_payload = self._apply_outbound_policy(
+                payload=payload, payload_schema=payload_schema
+            )
 
         # Resolve the peer through the Directory up-front so an unknown
         # principal fails fast before we do any work. The resolved record
@@ -252,6 +295,7 @@ class OutboundGateway:
         return OutboundResult(
             response_payload=response_envelope.payload,
             response_operation=response_envelope.operation,
+            response_payload_schema=response_envelope.payload_schema,
             response_sender_principal_id=response_envelope.sender_principal_id,
             task_id=assigned_task_id,
             context_id=context_id,

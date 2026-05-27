@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesherra.object/promotion-handle-v1",
+  "title": "Mesherra PromotionHandle v1",
+  "description": "The signed wire artifact for an Object promotion. Travels in the A2A Message metadata. Carries enough for the receiver to fetch scoped data (reference mode) or read the bytes inline (copy mode) and verify authenticity, never enough for them to know the full Object. Authoritative source: mesherra/src/mesherra/models/primitives.py (PromotionHandle). This JSON Schema is the runtime-validation and cross-language mirror.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "promotion_id",
+    "object_id",
+    "owner",
+    "receiver",
+    "schema_ref",
+    "mode",
+    "mutability",
+    "scope",
+    "snapshot_content_hash",
+    "expiry",
+    "issued_at",
+    "owner_signature"
+  ],
+  "properties": {
+    "version": {
+      "description": "Schema version of this handle.",
+      "const": 1
+    },
+    "promotion_id": {
+      "description": "Stable promotion ID (UUID-style). Distinct from object_id.",
+      "type": "string",
+      "minLength": 1
+    },
+    "object_id": {
+      "description": "The Object being promoted. Stable for the Object's lifetime.",
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "description": "Principal who owns the Object and authorized this promotion.",
+      "type": "string",
+      "minLength": 1
+    },
+    "receiver": {
+      "description": "Principal authorized to perceive the Object via this handle.",
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_ref": {
+      "description": "Schema ID of the Object state (e.g., meshycal.scheduling/calendar-v1).",
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "description": "reference: fetch on demand. copy: bytes in scoped_payload.",
+      "type": "string",
+      "enum": ["reference", "copy"]
+    },
+    "mutability": {
+      "description": "static: snapshot at promotion time. live: streaming updates (Slice 2).",
+      "type": "string",
+      "enum": ["static", "live"]
+    },
+    "scope": {
+      "description": "Field allow-list (Slice 1) governing what the receiver may perceive.",
+      "type": "object"
+    },
+    "snapshot_content_hash": {
+      "description": "SHA-256 (hex, lowercase) of canonical_json(scoped snapshot at promotion-creation time). The receiver verifies every fetch response matches.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fetch_endpoint": {
+      "description": "Reference mode only: owner's airlock URL where scoped data is fetched on demand. Absent for copy mode.",
+      "type": ["string", "null"]
+    },
+    "scoped_payload": {
+      "description": "Copy mode only: the bytes themselves, canonical-encoded. Absent for reference mode.",
+      "type": ["string", "null"]
+    },
+    "expiry": {
+      "description": "ISO 8601 UTC timestamp when this handle ceases to be valid.",
+      "type": "string",
+      "minLength": 1
+    },
+    "issued_at": {
+      "description": "ISO 8601 UTC timestamp when this handle was signed by the owner.",
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_signature": {
+      "description": "Ed25519 signature (base64) over canonical_json of this handle with owner_signature omitted. Verified against owner's public key resolved through the Identity Directory.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

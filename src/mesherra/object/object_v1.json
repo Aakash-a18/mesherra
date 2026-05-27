@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mesherra.object/object-v1",
+  "title": "Mesherra Object v1",
+  "description": "A passive resource (calendar, document, meeting agreement, etc.) owned by a single principal. The owner's stack holds canonical state; every observer reads through a scoped Promotion. Authoritative source: mesherra/src/mesherra/models/primitives.py (Object). This JSON Schema is the runtime-validation and cross-language mirror.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "object_id",
+    "owner",
+    "home_layer",
+    "mutability",
+    "schema_ref",
+    "state",
+    "object_version",
+    "content_hash",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "version": {
+      "description": "Schema version of this object record.",
+      "const": 1
+    },
+    "object_id": {
+      "description": "Stable Object identifier (UUID-style). Assigned at create; never changes across the Object's lifetime.",
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "description": "Principal that canonically owns this Object. Mutations are owner-only.",
+      "type": "string",
+      "minLength": 1
+    },
+    "home_layer": {
+      "description": "Default visibility layer when no active Promotion grants a viewer access.",
+      "type": "string",
+      "enum": ["personal", "shared", "public"]
+    },
+    "mutability": {
+      "description": "static: snapshot at promotion time. live: continuously updated reference (Slice 2).",
+      "type": "string",
+      "enum": ["static", "live"]
+    },
+    "schema_ref": {
+      "description": "Schema ID of the state payload (e.g., meshycal.scheduling/calendar-v1).",
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "description": "The Object's content. Structure governed by schema_ref.",
+      "type": "object"
+    },
+    "object_version": {
+      "description": "Monotonic per-Object version. Starts at 1; bumps on every mutation.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "content_hash": {
+      "description": "SHA-256 (hex, lowercase) of canonical_json(state). Computed by the model; mismatched caller-supplied values are rejected at construction.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "created_at": {
+      "description": "ISO 8601 UTC timestamp of creation.",
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "description": "ISO 8601 UTC timestamp of last mutation. Equals created_at at create.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

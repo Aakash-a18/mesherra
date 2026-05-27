@@ -161,6 +161,8 @@ The receiver does NOT receive:
 
 When the receiver's agent needs to read the Object, it queries the owner's airlock through the handle. Each fetch is policy-checked at the owner's side *before release* and policy-checked at the receiver's side *on arrival* against acceptance rules. The symmetry matters: the owner enforces what they release; the receiver enforces what they accept. Each fetch is logged in both sides' residue.
 
+> **Slice 1+2 deferral (Phase 4):** the Phase 4 Slice 1 and Slice 2 implementations do *not* run the Policy Engine on the trust-layer wire traffic — PROMOTE / FETCH / FETCH_RESPONSE / FETCH_DENIED (Slice 1) plus SUBSCRIBE / UNSUBSCRIBE / OBJECT_UPDATE (Slice 2) — all of which are wired straight to the Object handler (§13.13) on the inbound side and bypass the outbound policy gate. The Policy Engine v1 has no `inbound_accept` rule type yet, and its default-deny stance on unmatched schemas would otherwise block every promotion or live push the moment a real PolicyStore is wired. Bilateral fetch policy (per-message owner-release rules + receiver acceptance rules) is the Slice 3+ work that closes this gap and restores the architectural commitment above. Until then, scope enforcement remains *at promotion creation time* (the snapshot is captured against `scope.fields` once for static; the live push fan-out re-applies the same scope filter on every mutation) rather than per-message via policy.
+
 **Copy promotion (explicit, warned, irrevocable)**
 
 The receiver gets *bytes*:
@@ -178,7 +180,7 @@ Architectural principle: **prevention requires reference; conditions require cop
 Cross-cutting with share mode is the Object's mutability (from 3.2 Type properties), and the wire pattern differs by combination:
 
 - **Static reference** — the Object does not change after promotion. The receiver sees one snapshot. Wire pattern is on-demand **pull**: the receiver hits the owner's fetch endpoint when they need data, each call policy-checked on both sides. The Object ID and content hash are both stable across the lifetime of the promotion.
-- **Live reference** — the receiver sees ongoing updates. Wire pattern is **push** via A2A's `SubscribeToTask`: the receiver subscribes once, the owner streams a new signed envelope per update on the established channel. Each envelope carries the stable Object ID, a new content hash per update, and is policy-checked at the receiver's inbound gateway before delivery to the consumer agent.
+- **Live reference** — the receiver sees ongoing updates. Wire pattern is **push**: the receiver subscribes once, the owner pushes a new signed envelope per update. Slice 2 ships this as discrete request-response messages over the existing wire (SUBSCRIBE → owner records subscription → owner's `update_object` mutation fans out OBJECT_UPDATE messages to every active subscriber, each carrying the Object's monotonic `object_version` and the SHA-256/JCS hash of the scoped state). True server-streaming via A2A's `SubscribeToTask` / `tasks/resubscribe` is a Slice 3+ optimisation; the `object-update-v1` schema is forward-compatible with either transport. Each envelope carries the stable promotion_id, the scoped state, a per-push content hash, and is policy-checked at the receiver's inbound gateway before delivery to the consumer agent (the policy gate is itself Slice 3+; see the deferral note in §3.7 above).
 - **Copy mode** is always a one-time transfer regardless of source mutability. If the source mutates after copy, the receiver still holds only the original snapshot. There is no "live copy."
 
 Live promotion is more powerful and more dangerous. It permits a long-running stream that the owner may have authorized once and forgotten about. Default policy should require explicit opt-in to live mode and bounded expiry.
@@ -592,6 +594,10 @@ Why the split: A2A 1.0 assigns `task_id` only after the server-side roundtrip. T
 
 There is no path from consumer code to the A2A wire that bypasses the Outbound Gateway. All outbound traffic goes through here.
 
+#### Phase 4 trust-layer ops (bypass step 1)
+
+Outbound `PROMOTE / FETCH / FETCH_RESPONSE / FETCH_DENIED` operations carry Mesherra's own promotion-lifecycle wire schemas (`mesherra.object/*`). The Policy Engine has no rules for these schemas — they are protocol-level, not user-policy-level — and the engine's default-deny stance on unmatched schemas would otherwise reject every `Mesherra.promote()` / `fetch_object()` call as soon as a real PolicyStore is wired. Step 1 (policy decision) is therefore *skipped* for these four operations; steps 2–8 (peer resolution, SendClaim signing, residue) run unchanged. Symmetric with the inbound bypass in §13.3.
+
 ### 13.3 Inbound Gateway
 
 Sits between the A2A SDK Adapter (§13.10) and the consumer's agent handler. Owns every trust decision on incoming messages. No consumer code ever receives raw envelopes.
@@ -606,6 +612,7 @@ When the adapter delivers a `MesherraEnvelope` via the registered `InboundHandle
 3a. **Clock-skew window check** (Phase 2 hardening per §11.1). Reject if `envelope.timestamp` is outside `now ± MESHERRA_CLOCK_SKEW_SECONDS`. → `TimestampOutsideWindowError`.
 3b. **Nonce replay check** (Phase 2 hardening per §11.1). The gateway maintains a TTL-pruned `(sender_principal_id, nonce)` seen-set with lifetime `2 × clock_skew_seconds` (the longest a replay could still pass the timestamp check). If the pair has already been observed within the window, reject. → `ReplayedNonceError`. Order matters: this check runs AFTER signature verification so the seen-set is only populated by verified envelopes from known senders; an attacker cannot fill it with unverified traffic.
 4. **Policy decision.** Ask the Policy Engine (§13.4) for an `allow / allow_scoped / block / escalate` verdict against the user's signed policy version. Apply the verdict — for `allow_scoped`, narrow the payload to the policy-permitted fields.
+4a. **Phase 4 trust-op dispatch.** Before step 4 runs, the gateway inspects `envelope.operation`. If the operation is one of `PROMOTE / FETCH` (Slice 1 inbound trust-layer ops) or `SUBSCRIBE / UNSUBSCRIBE / OBJECT_UPDATE` (Slice 2 inbound trust-layer ops), the gateway *skips step 4* and dispatches the verified envelope to the Object handler (§13.13) instead of the consumer. Step 5 (residue write) still records the wire bytes; step 6 (consumer invocation) is replaced by the Object handler's `HandlerOutput → OutgoingResponse` translation. If the operation is one of `FETCH_RESPONSE / FETCH_DENIED` — response-only operations that should only ever arrive as the response to our own outbound FETCH — the gateway raises `UnsolicitedTrustOperation` and aborts (no residue, no dispatch). This pin is what keeps consumer code from intercepting trust-layer ops and violating the scope-filter (§9 #15 in `demos/phase_4/SPEC.md`) and stolen-handle (§9 #16) invariants. The Slice 2 ops extend these invariants to live promotions: SUBSCRIBE / OBJECT_UPDATE both check `sender_principal_id == promotion.receiver` (or `handle.owner` for the receiver-side OBJECT_UPDATE) before any state mutation, preventing stolen-handle subscribes and forwarded pushes.
 5. **Residue write.** Build a `receive` Residue entry for this exchange (the A2A-assigned `task_id` is now known — it's on `envelope.task_id`). Sign with this user's key. Append to the per-user Provenance Ledger (§13.8). This happens *after* all verification steps so the ledger only contains observations the gateway has accepted as trustworthy. The ledger's duplicate-rejecting constraint (§13.8) raises `DuplicateEntry` if the same `(task_id, action_type, operation)` has already been recorded — this only happens if the seen-set in step 3b missed (e.g., across a process restart), and surfacing it as a hard error is the right behavior because a ledger that silently accepts duplicate writes has lost integrity.
 6. **Agent invocation.** Call the registered consumer handler with the verified (and possibly scoped) envelope. The handler's return envelope flows back through the gateway, which:
    - Builds and signs the gateway's `emit` Residue for the response.
@@ -869,6 +876,48 @@ v0: centralized, Mesherra-hosted. Same migration path to federated/decentralized
 
 See section 8 for the broader schema-based messaging model that this component supports.
 
+### 13.12 Object Store
+
+Per-principal append-and-update persistence for Mesherra `Object`s (§3.2) and the `Promotion` records derived from them (§3.7). Parallel to §13.8 Provenance Ledger in shape and discipline: one SQLite file per principal, self-describing meta row, denormalized indexed columns plus a canonical-JSON source-of-truth column.
+
+Operations:
+
+- `put(object)` — insert-or-update an Object (owner-only at the SDK gate; ObjectStore itself trusts caller)
+- `get(object_id)` → the canonical Object, reconstructed from the source-of-truth JSON column
+- `list()` → all Objects in this principal's store
+- `record_promotion(promotion)` — append a Promotion row tying `promotion_id` to `(object_id, snapshot_state, scope, expiry, receiver)`
+- `get_promotion(promotion_id)`, `list_promotions_for_object(object_id)`, `list_promotions_for_receiver(receiver)`
+- **Slice 2 active-subscriptions table** (`active_subscriptions`): one row per (promotion_id, role) tracking the live-subscription state. Role distinguishes owner-side rows (one per receiver who has subscribed) from receiver-side rows (one per active subscription this principal holds against an owner). Operations: `record_subscription`, `get_subscription`, `update_subscription_status`, `update_subscription_pushed_version`, `reset_subscription_pushed_version`, `update_subscription_peer_url`, `list_active_subscriptions_for_object`. Unlike `promotions`, this table is update-mutated: status and `last_pushed_object_version` advance over time (the history of changes lives in the residue ledger).
+
+Storage rule: every column outside the canonical JSON column is denormalized for query. The canonical JSON column is the source of truth; on row read, the loader reconstructs the model and asserts denormalized columns match. Drift between the two is a corruption signal.
+
+Trust model: ObjectStore enforces append-only semantics on `promotions` (no update/delete). Promotion-time `snapshot_state` is stored inline for static reference promotions and returned verbatim on every fetch — the snapshot's content_hash is the cryptographic anchor that links the wire PromotionHandle to what the counterpart actually sees, regardless of whether the owner mutates the Object afterwards. For live promotions, `snapshot_state` is `null` on the Promotion row (pushes carry the snapshot; fetches compute it from the Object's current state); the handle's `snapshot_content_hash` commits to the *initial* scoped state at promotion-creation time, which the consumer may use to verify the first push (per `demos/phase_4/SLICE_2_SPEC.md` §6.2).
+
+v0: SQLite, parallel to §13.8. Same future pluggability story.
+
+See `demos/phase_4/SPEC.md` for the Slice 1 schema and end-state assertions, and `demos/phase_4/SLICE_2_SPEC.md` for the Slice 2 additions (the `active_subscriptions` table and live-reference push lifecycle).
+
+### 13.13 Object Handler
+
+Trust-layer routine the Inbound Gateway (§13.3) dispatches to for Phase 4 trust-layer operations. The handler sits between the gateway and the Object Store (§13.12), enforcing the invariants that the consumer is not allowed to violate.
+
+**Slice 1 responsibilities (PROMOTE / FETCH):**
+
+- **PROMOTE inbound.** Verify `handle.owner_signature` against `handle.owner`'s directory-resolved public key (a second signature check on top of the gateway's SendClaim verification — the gateway proves the envelope is from the sender, the handler proves the handle's *contents* are owner-authored). Slice 1 forbids forwarded handles: `sender_principal_id == handle.owner` is required; relaxation is Slice 3+. On success, persist via `ObjectStore.record_received_handle` (which itself enforces `handle.receiver == this principal`, the second line of defense behind the airlock) and return a `PromotionAck`.
+- **FETCH inbound.** Look up the promotion in our own ObjectStore. Three soft failures return a `FetchDenied` (with a pinned `DenialReason` Literal — `expired`, `revoked`, `receiver_mismatch`, `unknown_promotion`, `scope_violation`): unknown promotion id, sender not the promotion's receiver (the §9 #16 stolen-handle invariant), or current time past `promotion.expiry`. On success, build a `FetchResponse` — STATIC promotions return the pre-stored snapshot verbatim (Slice 1 byte-equality across fetches); LIVE promotions compute the scoped state fresh from the Object's current state (Slice 2 §6.2 LIVE-fetch semantics).
+
+**Slice 2 responsibilities (SUBSCRIBE / UNSUBSCRIBE / OBJECT_UPDATE):**
+
+- **SUBSCRIBE inbound (owner-side).** Per the §7.2 SUBSCRIBE matrix in `demos/phase_4/SLICE_2_SPEC.md`: branches on pre-state via `get_subscription` BEFORE any store mutation, so an EXPIRED row produces `SubscribeDenied(expired)` on the wire rather than the internal `InvalidSubscriptionTransition`. Soft denials cover `unknown_promotion`, `receiver_mismatch` (stolen-handle invariant extended to LIVE), `not_live_promotion`, and `expired`. On success, inserts or transitions the owner-side `active_subscriptions` row to ACTIVE (with the receiver's listener URL captured for the push path), resets `last_pushed_object_version` on the CLOSED_BY_RECEIVER → ACTIVE re-subscribe path, and refreshes `peer_url` on both CLOSED_BY_RECEIVER → ACTIVE and DISCONNECTED → ACTIVE recovery paths.
+- **UNSUBSCRIBE inbound (owner-side).** Per the §7.2 UNSUBSCRIBE matrix: marks the row CLOSED_BY_RECEIVER. Soft denials `not_active` (no row, or sender != receiver — collapsed to the same reason to avoid leaking row existence to Eve) and `expired`.
+- **OBJECT_UPDATE inbound (receiver-side).** Per §7.3: hard failures (unknown received handle, sender != handle.owner, mutability != LIVE, on-the-wire snapshot_content_hash mismatch after defense-in-depth recomputation) raise `InvalidObjectUpdatePayload`. Soft failures (expired handle, no subscription row, `object_version <= last_pushed_object_version` regression) return `ObjectUpdateDenied` with a structured reason. On success, bumps `last_pushed_object_version` on the receiver-side row and invokes the SDK-registered `on_object_update` callback with verified data only.
+
+Why a separate handler (not the consumer): these operations are part of Mesherra's trust contract. Letting domain code intercept them would let a consumer return the wrong snapshot (violating §9 #15), accept fetches or pushes from non-receivers (violating §9 #16), or forward live pushes without owner authority. The Inbound Gateway dispatches these operations to the handler *before* the consumer ever sees them.
+
+Construction: one handler per Mesherra instance, built by the SDK whenever an `object_store` is provided. The handler holds an optional `_object_update_callback` (set via `register_object_update_callback`) that the SDK wires from `Mesherra.on_object_update`. Stateless across calls beyond that one slot — all persistent state lives in the store. The SDK wires the handler into the Inbound Gateway as the `object_handler` parameter; gateways constructed without one raise `TrustLayerHandlerNotWired` on any inbound trust-layer op so a misconfiguration fails loudly rather than silently dispatching to the consumer.
+
+See `demos/phase_4/SPEC.md` §8 for the Slice 1 wire-protocol details and §9 #15/#16 for the privacy invariants; see `demos/phase_4/SLICE_2_SPEC.md` §§2, 7.2-7.3, 9 #11-#13 for the Slice 2 extensions.
+
 ### Build order, mapped to components
 
 The pieces from section 4 map onto these components as follows:
@@ -877,7 +926,8 @@ The pieces from section 4 map onto these components as follows:
 |---|---|
 | Provenance / attestation (ships first) | 13.8 Provenance Ledger, 13.9 Crypto Primitives |
 | Identity verification (ships second) | 13.5 Identity Directory, 13.7 Directory Store |
-| Scoped disclosure (ships last) | 13.4 Policy Engine, 13.2 Outbound Gateway, 13.3 Inbound Gateway, 13.11 Schema Registry |
+| Scoped disclosure (ships third) | 13.4 Policy Engine, 13.2 Outbound Gateway, 13.3 Inbound Gateway, 13.11 Schema Registry |
+| Object promotion lifecycle (ships fourth) | 13.12 Object Store, 13.13 Object Handler, plus extensions to 13.2 / 13.3 for `promote` and `fetch` operations |
 | Policy capture (co-develops throughout) | 13.6 Policy Store, plus schema work in 13.4 |
 
 The SDK (13.1) and A2A SDK Adapter (13.10) are foundational: both develop continuously from day one because every piece depends on them.
