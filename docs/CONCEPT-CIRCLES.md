@@ -312,6 +312,13 @@ Two structural notes:
   Circle (graceful degradation vs. refusal to join).
 - **Multi-party residue.** Bilateral residue is well-defined; what does the
   append-only trace look like when N members hold handles to one Object?
+- **Role assignment provenance.** Who may assign or change a member's role,
+  and how the assignment is itself signed and recorded — a role change is an
+  authority change and belongs in residue like any promotion.
+- **Derived-Object provenance.** When a domain agent derives a shareable
+  Object from private source data (§3), residue must record the derivation
+  without leaking the source. Schema for "derived-from" links that preserve
+  the privacy boundary.
 - **Authority manifest.** Concrete shape of the reviewable grant object for an
   agent-authored Delegation (schemas + verbs + scopes), and how much of its
   approval a constitution can safely automate versus escalate to a human.
