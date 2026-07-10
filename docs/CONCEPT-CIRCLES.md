@@ -181,7 +181,55 @@ The nudge a member sees is **their own agent talking to them**, informed by
 Circle-shared derived Objects — not a third-party service that harvested the
 household's data.
 
-## 4. Open questions
+## 4. Delegations are applications for agents
+
+The example above still assumed a store: a member *finds* the Delegation. With
+agentic coding the marginal cost of authoring the four-piece package (Object
+class, Agent code, Policy templates, UI manifest) approaches zero, and the
+concept sharpens into its final form:
+
+> **A Delegation is an application whose primary user is an agent.** Humans
+> supply intent and receive outcomes. The UI is a projection, generated on
+> demand — possibly never.
+
+Three consequences:
+
+**Market-of-one software.** A Delegation custom-tuned to a single Circle is
+economically viable. A member's agent does not find the meal-memory
+Delegation — it *writes* it, proposes it to the Circle, actively uses it,
+monitors it, and reports back. If a human ever wants to look, their agent
+projects a visual layer on the spot (screen, AR overlay — whatever the
+current era renders to). If they never ask, no UI ever exists. This is build
+discipline #3 ("principal model first, renderer second; the UI is disposable")
+taken to its endpoint: the renderer is not merely disposable but **lazily
+generated**.
+
+**Distribution inverts.** The "store" stops being a shelf of binaries and
+becomes, at most, a library of proven schemas and authority patterns that
+agents draw on when synthesizing. The four-piece package remains portable —
+a Delegation authored for one Circle can still be published — but publication
+is an option, not the pipeline.
+
+**Trust relocates from author to container.** Agent-authored, on-the-spot
+software running inside a shared context is untenable in the current model,
+which locates trust in the *author* (app review, brand, code audit). When the
+author is an ephemeral agent, that anchor is gone. Mesherra relocates trust to
+the **container**: the synthesized Delegation runs under each member's butler,
+holds only capability-scoped handles minted from the Circle constitution, and
+every action lands in residue. Nobody trusts the code, because the code
+cannot express actions outside its grant (§2.4). Review changes shape
+accordingly: nothing reviews the implementation; the butler — or the human,
+for high-stakes grants — reviews the **authority manifest**: which schemas,
+which verbs, which scopes. That is a small, structured, policy-checkable
+object, so consent to agent-authored software can itself be largely automated
+under the constitution.
+
+A closing symmetry: "the agent monitors the application and gives the user
+feedback on its usage" requires no telemetry system. Residue *is* the usage
+record — the agent reports by reading the signed trace, and there is nothing
+for the Delegation's author (an agent) to exfiltrate.
+
+## 5. Open questions
 
 - **Circle schema.** Membership lifecycle (join, leave, eviction), role
   lattice representation, constitution amendment and re-signing.
@@ -196,6 +244,9 @@ household's data.
   Circle (graceful degradation vs. refusal to join).
 - **Multi-party residue.** Bilateral residue is well-defined; what does the
   append-only trace look like when N members hold handles to one Object?
+- **Authority manifest.** Concrete shape of the reviewable grant object for an
+  agent-authored Delegation (schemas + verbs + scopes), and how much of its
+  approval a constitution can safely automate versus escalate to a human.
 - **Sequencing.** None of this blocks Phases 1–4. Circles look like a
   post-Phase-4 layer that reuses promotions, policy, and residue as-is and
   adds the standing-context, role, and constitution-composition machinery on
