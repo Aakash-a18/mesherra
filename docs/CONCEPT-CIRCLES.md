@@ -229,7 +229,75 @@ feedback on its usage" requires no telemetry system. Residue *is* the usage
 record — the agent reports by reading the signed trace, and there is nothing
 for the Delegation's author (an agent) to exfiltrate.
 
-## 5. Open questions
+## 5. The Delegation market and embedded Delegations
+
+Two refinements reconcile §4's "distribution inverts" with a real marketplace
+and extend the model to the physical world.
+
+### 5.1 Published Delegations are starting points, not finished apps
+
+People (and companies) still publish Delegations to a store — but what is
+published is a **scaffold**. The installing agent fine-tunes it to the
+contextual needs of its principal: per user, per Circle, per whatever context
+it installs into. Customization is the expected path, not a violation of the
+artifact.
+
+This splits trust in two, cleanly:
+
+- **The base** — audited, signed, attested by its publisher. Its authority
+  manifest (§4) is the published, reviewable contract.
+- **The delta** — the local fine-tune the installing agent applies. Signing
+  and residue let the tuned instance attest *"derived from publisher X's
+  Delegation vN, with these local modifications,"* so the butler reviews only
+  the delta against the base's manifest.
+
+The publisher attests the base; the local constitution governs the fork. A
+store of scaffolds with attested lineage is a healthier market than a store
+of sealed binaries: the vendor's audit still means something after the
+fine-tune, because the delta is enumerable and signed.
+
+### 5.2 Embedded Delegations — products ship with their application-for-agents
+
+Companies integrate Delegations with physical products. Synthetic example: a
+smart lock ships with the lock company's Delegation. Installed into a
+household Circle, the unlock flow becomes an agent negotiation:
+
+1. A resident approaches. The doorway camera's domain agent derives a claim
+   (face matches a resident-role member); the resident's device attests
+   proximity. Sensor fusion happens **across the household's own agents'
+   handshakes, inside the boundary** — the raw camera stream and location
+   never leave.
+2. What crosses to the lock's agent is a derived, capability-scoped claim:
+   *resident-role member present, confidence X* — signed, replay-defended.
+3. The lock's bond with the household was minted at install time (the tessera
+   pattern: the decision at the door is "do the halves fit," not per-event
+   trust). The Circle constitution authorizes auto-unlock for resident-role
+   claims above a confidence threshold; below it, escalate to a human.
+4. The unlock lands in residue: which signals attested, under whose authority.
+
+What this displaces: today the same flow requires a vendor app, a vendor
+cloud account per device, a business-development partnership between the
+camera and lock companies, and both vendors learning the household's
+comings and goings. In the Delegation model the vendor's code runs **under
+each member's butler**; cross-vendor composition happens through registered
+schemas under one constitution, not through partnerships; and the vendors
+never see the data their devices act on.
+
+Two structural notes:
+
+- **Physical actuation verbs are the copy-mode problem in physical form** —
+  irreversible once executed. They are precisely the verb class a
+  constitution should gate behind multi-signal concurrence and human
+  escalation, and where identity verification and replay defense (Phase 2)
+  carry the most weight: a spoofed claim here opens a door.
+- **Device modeling is unresolved**: is a lock an Agent (a principal that
+  handshakes) or an Object (a passive resource actuated by the vendor
+  Delegation's domain agent)? The vocabulary wants devices to be Objects and
+  the Delegation's domain agents to be the principals — but the device holds
+  key material for its tessera bond, making it at least an identity-bearing
+  Object. Pin down before any device story ships.
+
+## 6. Open questions
 
 - **Circle schema.** Membership lifecycle (join, leave, eviction), role
   lattice representation, constitution amendment and re-signing.
@@ -247,6 +315,13 @@ for the Delegation's author (an agent) to exfiltrate.
 - **Authority manifest.** Concrete shape of the reviewable grant object for an
   agent-authored Delegation (schemas + verbs + scopes), and how much of its
   approval a constitution can safely automate versus escalate to a human.
+- **Fork provenance.** Attestation format for a fine-tuned Delegation
+  instance (base publisher + version + signed delta), and what invalidates
+  the base's audit — can a delta ever *expand* the base's authority manifest,
+  or is the fork restrict-only like constitution composition?
+- **Device principals.** Whether hardware is an Agent, an Object, or an
+  identity-bearing Object actuated by a domain agent (§5.2), and how physical
+  actuation verbs are classed and gated.
 - **Sequencing.** None of this blocks Phases 1–4. Circles look like a
   post-Phase-4 layer that reuses promotions, policy, and residue as-is and
   adds the standing-context, role, and constitution-composition machinery on
